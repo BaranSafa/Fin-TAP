@@ -273,7 +273,16 @@ def market_summary():
             
     return jsonify(summary)
 
+@app.route('/db-kur')
+def db_kur():
+    try:
+        with app.app_context():
+            db.create_all()
+        return "<h1>BAŞARILI! Tablolar oluşturuldu. Şimdi /register sayfasına gidip kayıt olabilirsin.</h1>"
+    except Exception as e:
+        return f"<h1>HATA OLUŞTU: {str(e)}</h1>"
+
 
 if __name__ == '__main__':
     check_system()
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5000)  
