@@ -2,36 +2,50 @@
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
-    <title>Giriş Yap - Fin-TAP</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kayıt Ol - Fin-TAP</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-900 flex items-center justify-center h-screen">
     <div class="w-full max-w-md bg-gray-800 p-8 rounded-lg shadow-2xl border border-gray-700">
-        <h2 class="text-3xl font-bold text-cyan-400 text-center mb-6">Fin-TAP v2.0</h2>
         
-        {% with messages = get_flashed_messages() %}
+        <h2 class="text-3xl font-bold text-cyan-400 text-center mb-2">Fin-TAP v2.0</h2>
+        <p class="text-gray-400 text-center mb-6">Hemen katıl, 5 Token kazan!</p>
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
-            <div class="bg-red-500 text-white p-3 rounded mb-4 text-sm text-center">
-                {{ messages[0] }}
+            {% for category, message in messages %}
+            <div class="p-3 rounded mb-4 text-sm text-center {{ 'bg-red-500 text-white' if category == 'error' else 'bg-green-500 text-white' }}">
+                {{ message }}
             </div>
+            {% endfor %}
         {% endif %}
         {% endwith %}
 
-        <form method="POST" action="/login">
+        <form method="POST" action="/register">
+            
+            <div class="mb-4">
+                <label class="block text-gray-300 text-sm font-bold mb-2">Ad Soyad</label>
+                <input type="text" name="name" placeholder="Örn: Ali Yılmaz" class="w-full p-3 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none focus:border-cyan-400 placeholder-gray-500" required>
+            </div>
+
             <div class="mb-4">
                 <label class="block text-gray-300 text-sm font-bold mb-2">E-Posta</label>
-                <input type="email" name="email" class="w-full p-3 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none focus:border-cyan-400" required>
+                <input type="email" name="email" placeholder="ornek@email.com" class="w-full p-3 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none focus:border-cyan-400 placeholder-gray-500" required>
             </div>
+
             <div class="mb-6">
                 <label class="block text-gray-300 text-sm font-bold mb-2">Şifre</label>
-                <input type="password" name="password" class="w-full p-3 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none focus:border-cyan-400" required>
+                <input type="password" name="password" placeholder="********" class="w-full p-3 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none focus:border-cyan-400 placeholder-gray-500" required>
             </div>
-            <button type="submit" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 rounded transition duration-300">
-                Giriş Yap
+
+            <button type="submit" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 rounded transition duration-300 shadow-lg">
+                Ücretsiz Kayıt Ol
             </button>
         </form>
-        <p class="text-gray-400 text-center mt-4 text-sm">
-            Hesabın yok mu? <a href="/register" class="text-cyan-400 hover:underline">Kayıt Ol</a>
+        <p class="text-gray-400 text-center mt-6 text-sm">
+            Zaten bir hesabın var mı? 
+            <a href="/login" class="text-cyan-400 hover:underline font-bold">Giriş Yap</a>
         </p>
     </div>
 </body>
