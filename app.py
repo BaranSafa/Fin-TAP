@@ -126,7 +126,7 @@ def register():
             return redirect(url_for('register'))
         
         # 2. Kayıt: Yeni kullanıcı oluştur
-        new_user = User(email=email, name=name, password=generate_password_hash(password, method='sha256'))
+        new_user = User(email=email, name=name, password=generate_password_hash(password))
         db.session.add(new_user)
         db.session.commit()
         
