@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}Fin-TAP - Karşılaştırma{% endblock %}
+{% block header_title %}Hisse Karşılaştırma Aracı{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto">
+    
+    <div class="bg-gray-800 p-6 rounded-xl shadow-lg mb-8 border border-gray-700">
+        <div class="flex flex-col md:flex-row items-center justify-between gap-4">
+            
+            <div class="w-full">
+                <label class="block text-cyan-400 mb-2 font-bold">1. Hisse</label>
+                <select id="ticker1" class="w-full bg-gray-900 border border-gray-600 p-3 rounded text-white focus:border-cyan-500 outline-none">
+                    {% for s in stocks %}
+                    <option value="{{ s }}">{{ s }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="flex-shrink-0 bg-gray-700 rounded-full p-3 w-12 h-12 flex items-center justify-center font-black text-white border-2 border-gray-600 shadow-xl z-10">
+                VS
+            </div>
+
+            <div class="w-full">
+                <label class="block text-purple-400 mb-2 font-bold">2. Hisse</label>
+                <select id="ticker2" class="w-full bg-gray-900 border border-gray-600 p-3 rounded text-white focus:border-purple-500 outline-none">
+                    {% for s in stocks %}
+                    <option value="{{ s }}" {% if loop.index == 2 %}selected{% endif %}>{{ s }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <button onclick="compareStocks()" class="w-full mt-6 bg-gradient-to-r from-cyan-600 to-purple-600 hover:from-cyan-500 hover:to-purple-500 text-white font-bold py-3 rounded-lg transition shadow-lg">
+            KARŞILAŞTIRMAYI BAŞLAT
+        </button>
+    </div>
+
+    <div id="result-area" class="hidden animate-fade-in-up">
+        
+        <div class="grid grid-cols-3 gap-0 bg-gray-800 rounded-xl overflow-hidden border border-gray-700">
+            
+            <div class="col-span-3 grid grid-cols-3 bg-gray-900 p-4 border-b border-gray-700 text-center">
+                <h3 id="name1" class="text-xl font-bold text-cyan-400">--</h3>
+                <span class="text-gray-500 text-sm flex items-center justify-center">METRİK</span>
+                <h3 id="name2" class="text-xl font-bold text-purple-400">--</h3>
+            </div>
+
+            <div class="p-4 text-center text-white border-r border-gray-700 flex items-center justify-center"><span id="price1" class="text-lg">--</span></div>
+            <div class="p-4 text-center text-gray-400 bg-gray-800/50 flex items-center justify-center text-sm">Mevcut Fiyat</div>
+            <div class="p-4 text-center text-white border-l border-gray-700 flex items-center justify-center"><span id="price2" class="text-lg">--</span></div>
+            
+            <div class="p-4 text-center text-white border-r border-gray-700 flex items-center justify-center border-t border-gray-700"><span id="pred1" class="text-lg font-bold">--</span></div>
+            <div class="p-4 text-center text-gray-400 bg-gray-800/50 flex items-center justify-center text-sm border-t border-gray-700">AI Hedef (7 Gün)</div>
+            <div class="p-4 text-center text-white border-l border-gray-700 flex items-center justify-center border-t border-gray-700"><span id="pred2" class="text-lg font-bold">--</span></div>
+
+            <div class="p-4 text-center border-r border-gray-700 flex items-center justify-center border-t border-gray-700 bg-gray-900/30"><span id="gain1" class="text-xl font-black">--</span></div>
+            <div class="p-4 text-center text-gray-400 bg-gray-800/50 flex items-center justify-center text-sm border-t border-gray-700">Getiri Potansiyeli</div>
+            <div class="p-4 text-center border-l border-gray-700 flex items-center justify-center border-t border-gray-700 bg-gray-900/30"><span id="gain2" class="text-xl font-black">--</span></div>
+
+            <div class="p-4 text-center text-white border-r border-gray-700 flex items-center justify-center border-t border-gray-700"><span id="rsi1">--</span></div>
+            <div class="p-4 text-center text-gray-400 bg-gray-800/50 flex items-center justify-center text-sm border-t border-gray-700">RSI (Teknik)</div>
+            <div class="p-4 text-center text-white border-l border-gray-700 flex items-center justify-center border-t border-gray-700"><span id="rsi2">--</span></div>
+
+            <div class="p-4 text-center text-white border-r border-gray-700 flex items-center justify-center border-t border-gray-700"><span id="vol1">--</span></div>
+            <div class="p-4 text-center text-gray-400 bg-gray-800/50 flex items-center justify-center text-sm border-t border-gray-700">Risk (Volatilite)</div>
+            <div class="p-4 text-center text-white border-l border-gray-700 flex items-center justify-center border-t border-gray-700"><span id="vol2">--</span></div>
+
+        </div>
+        
+        <div class="mt-6 p-4 rounded-lg bg-gray-800 border border-gray-700 text-center shadow-lg">
+            <p class="text-gray-400 text-sm mb-2">AI TERCİHİ</p>
+            <h2 id="winner-text" class="text-2xl font-bold text-white">--</h2>
+        </div>
+
+    </div>
+</div>
+
+<script>
+async function compareStocks() {
+    const t1 = document.getElementById('ticker1').value;
+    const t2 = document.getElementById('ticker2').value;
+    const resultArea = document.getElementById('result-area');
+    
+    if(t1 === t2) { alert("Lütfen farklı hisseler seçin!"); return; }
+
+    // Loading...
+    document.querySelector('button').innerText = "ANALİZ EDİLİYOR...";
+    document.querySelector('button').disabled = true;
+    
+    try {
+        const res = await fetch(`/api/compare_stocks?ticker1=${t1}&ticker2=${t2}`);
+        const data = await res.json();
+        
+        if(data.error) throw new Error(data.error);
+
+        const d1 = data[t1];
+        const d2 = data[t2];
+
+        // İsimler
+        document.getElementById('name1').innerText = t1;
+        document.getElementById('name2').innerText = t2;
+        
+        // Veriler
+        document.getElementById('price1').innerText = `$${d1.price}`;
+        document.getElementById('price2').innerText = `$${d2.price}`;
+        
+        document.getElementById('pred1').innerText = `$${d1.predicted}`;
+        document.getElementById('pred2').innerText = `$${d2.predicted}`;
+        
+        // Renklendirme (Gain)
+        const g1 = document.getElementById('gain1');
+        const g2 = document.getElementById('gain2');
+        g1.innerText = `%${d1.gain}`;
+        g2.innerText = `%${d2.gain}`;
+        g1.className = d1.gain > 0 ? "text-xl font-black text-green-400" : "text-xl font-black text-red-400";
+        g2.className = d2.gain > 0 ? "text-xl font-black text-green-400" : "text-xl font-black text-red-400";
+
+        document.getElementById('rsi1').innerText = d1.rsi;
+        document.getElementById('rsi2').innerText = d2.rsi;
+        
+        document.getElementById('vol1').innerText = d1.volatility;
+        document.getElementById('vol2').innerText = d2.volatility;
+
+        // Kazananı Belirle
+        let winner = "Eşit";
+        let color = "text-white";
+        
+        if (d1.gain > d2.gain) {
+            winner = `${t1} daha yüksek getiri potansiyeline sahip.`;
+            color = "text-cyan-400";
+        } else {
+            winner = `${t2} daha yüksek getiri potansiyeline sahip.`;
+            color = "text-purple-400";
+        }
+        
+        const wText = document.getElementById('winner-text');
+        wText.innerText = winner;
+        wText.className = `text-2xl font-bold ${color}`;
+
+        resultArea.classList.remove('hidden');
+
+    } catch (err) {
+        alert("Hata: " + err.message);
+    } finally {
+        document.querySelector('button').innerText = "KARŞILAŞTIRMAYI BAŞLAT";
+        document.querySelector('button').disabled = false;
+    }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block title %}Fin-TAP - Pricing{% endblock %}
+{% block header_title %}Membership Prices{% endblock %}
+
+{% block content %}
+<div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+    
+    <div class="text-center mb-10">
+        <h2 class="text-3xl font-bold text-white mb-3">Find the Right Plan for You</h2>
+        <p class="text-lg text-gray-400">Simple and transparent pricing. Planned for our future goals.</p>
+    </div>
+
+    <div class="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-8">
+
+        <div class="bg-gray-900 rounded-lg p-6 border border-gray-700 flex flex-col">
+            <h3 class="text-2xl font-semibold text-gray-300">Free / Basic</h3>
+            <p class="mt-2 text-gray-400">Free access to fundamental analysis tools.</p>
+            
+            <div class="my-5">
+                <span class="text-5xl font-bold text-white">$0</span>
+                <span class="text-gray-400">/ ay</span>
+            </div>
+            
+            <ul class="space-y-3 text-gray-300 mb-6 flex-grow">
+                <li class="flex items-center">
+                    <svg class="w-5 h-5 text-green-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                    <span>Top 5 most popular stocks (AAPL, GOOG etc.)</span>
+                </li>
+                <li class="flex items-center">
+                    <svg class="w-5 h-5 text-green-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                    <span>10 daily prediction queries</span>
+                </li>
+                <li class="flex items-center">
+                    <svg class="w-5 h-5 text-green-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                    <span>Standard model recommendations</span>
+                </li>
+            </ul>
+            
+            <button class="w-full p-3 font-semibold bg-gray-700 text-white rounded-md opacity-50 cursor-not-allowed">
+                Your Current Plan
+            </button>
+        </div>
+
+        <div class="bg-gray-900 rounded-lg p-6 border-2 border-cyan-500 flex flex-col relative">
+            <span class="absolute -top-3 left-1/2 -translate-x-1/2 bg-cyan-500 text-white text-xs font-bold px-3 py-1 rounded-full">EN POPÜLER</span>
+            
+            <h3 class="text-2xl font-semibold text-cyan-400">Pro</h3>
+            <p class="mt-2 text-gray-400">For serious investors and analysts.</p>
+            
+            <div class="my-5">
+                <span class="text-5xl font-bold text-white">$15</span>
+                <span class="text-gray-400">/ ay</span>
+            </div>
+            
+            <ul class="space-y-3 text-gray-300 mb-6 flex-grow">
+                <li class="flex items-center">
+                    <svg class="w-5 h-5 text-green-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                    <span>All S&P 500 Stocks</span>
+                </li>
+                <li class="flex items-center">
+                    <svg class="w-5 h-5 text-green-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                    <span>Unlimited prediction queries</span>
+                </li>
+                <li class="flex items-center">
+                    <svg class="w-5 h-5 text-green-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                    <span>Advanced model recommendations</span>
+                </li>
+                <li class="flex items-center">
+                    <svg class="w-5 h-5 text-green-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                    <span>Favorite stocks portfolio</span>
+                </li>
+            </ul>
+            
+            <button class="w-full p-3 font-semibold bg-cyan-500 text-white rounded-md hover:bg-cyan-600 transition-colors opacity-50 cursor-not-allowed">
+                (Soon)
+            </button>
+        </div>
+
+        <div class="bg-gray-900 rounded-lg p-6 border border-gray-700 flex flex-col">
+            <h3 class="text-2xl font-semibold text-gray-300">Enterprise</h3>
+            <p class="mt-2 text-gray-400">For enterprise teams and API access.</p>
+            
+            <div class="my-5">
+                <span class="text-5xl font-semibold text-white">Contact</span>
+            </div>
+            
+            <ul class="space-y-3 text-gray-300 mb-6 flex-grow">
+                <li class="flex items-center">
+                    <svg class="w-5 h-5 text-green-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                    <span>Everything in the Pro package</span>
+                </li>
+                <li class="flex items-center">
+                    <svg class="w-5 h-5 text-green-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                    <span>Direct access to the Prediction API</span>
+                </li>
+                <li class="flex items-center">
+                    <svg class="w-5 h-5 text-green-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                    <span>Priority support</span>
+                </li>
+            </ul>
+            
+            <button class="w-full p-3 font-semibold bg-gray-700 text-white rounded-md hover:bg-gray-600 transition-colors opacity-50 cursor-not-allowed">
+                (Soon)
+            </button>
+        </div>
+
+    </div>
+
+</div>
+{% endblock %}

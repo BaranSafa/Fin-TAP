@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}Fin-TAP - All Stocks{% endblock %}
+{% block header_title %}All Stocks{% endblock %}
+
+{% block content %}
+    <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+        <h2 class="text-2xl font-semibold mb-4">Trained Models</h2>
+        
+        {% if stocks %} <p class="text-gray-400 mb-6">You can get price predictions for the following stocks from the 'Predict' page. (Total: {{ stocks|length }})</p>
+            
+            <div class="overflow-x-auto rounded-lg border border-gray-700">
+                <table class="min-w-full divide-y divide-gray-700">
+                    <thead class="bg-gray-700">
+                        <tr>
+                            <th scope="col" class="py-3.5 px-4 text-left text-lg font-semibold text-gray-200">Stock Ticker (Ticker)</th>
+                            <th scope="col" class="relative py-3.5 px-4">
+                                <span class="sr-only">İşlem</span>
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-700 bg-gray-800">
+                        
+                        {% for ticker in stocks %}
+                        <tr>
+                            <td class="whitespace-nowrap py-4 px-4 text-lg font-medium text-cyan-400">{{ ticker }}</td>
+                            <td class="whitespace-nowrap py-4 px-4 text-right text-lg font-medium">
+                                <a href="{{ url_for('predict') }}?ticker={{ ticker }}" class="text-cyan-400 hover:text-cyan-300">
+                                    Guess &rarr;
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %} </tbody>
+                </table>
+            </div>
+
+        {% else %} <div class_alias="bg-yellow-900 border border-yellow-700 text-yellow-200 p-4 rounded-lg">
+                <h3 class="font-bold">Model Bulunamadı</h3>
+                <p>No trained models (`_scaler.joblib` file) were found in the 'models/' folder. Please run the `train.py` script first.</p>
+            </div>
+
+        {% endif %} </div>
+{% endblock %}

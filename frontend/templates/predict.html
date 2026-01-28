@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}Fin-TAP - Tahmin{% endblock %}
+{% block header_title %}Yapay Zeka Fiyat Tahmini{% endblock %}
+
+{% block content %}
+<div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+    <div class="flex flex-col md:flex-row gap-4 mb-6">
+        <div class="flex-1">
+            <label class="block text-gray-400 mb-2">Hisse Senedi</label>
+            <select id="ticker-input" class="w-full bg-gray-900 border border-gray-700 p-3 rounded text-white">
+                {% for ticker in trained_stocks %}
+                <option value="{{ ticker }}" {% if ticker == ticker_from_url %}selected{% endif %}>{{ ticker }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="flex-1">
+            <label class="block text-gray-400 mb-2">AI Modeli</label>
+            <select id="model-input" class="w-full bg-gray-900 border border-gray-700 p-3 rounded text-white">
+                <option value="LINEAR">Linear Regression (Hızlı)</option>
+                <option value="RANDOM_FOREST">Random Forest</option>
+                <option value="XGBOOST">XGBoost (Önerilen)</option>
+                <option value="LIGHTGBM">LightGBM</option>
+                <option value="LSTM">LSTM (Derin Öğrenme)</option>
+            </select>
+        </div>
+        <div class="flex items-end">
+            <button id="predict-button" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 px-6 rounded transition">
+                ANALİZ BAŞLAT
+            </button>
+        </div>
+    </div>
+
+    <div class="mt-8 border-t border-gray-700 pt-6">
+            <p class="text-gray-300 mb-4 font-medium">Modelin Kullanacağı Teknik Göstergeler (Features):</p>
+            
+            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4" id="feature-checkboxes">
+                
+                <label class="flex items-center space-x-2 cursor-pointer hover:bg-gray-700 p-1 rounded">
+                    <input type="checkbox" value="RSI" checked class="accent-cyan-500"> 
+                    <span class="text-gray-300">RSI (Göreceli Güç)</span>
+                </label>
+                
+                <label class="flex items-center space-x-2 cursor-pointer hover:bg-gray-700 p-1 rounded">
+                    <input type="checkbox" value="MACD" checked class="accent-cyan-500"> 
+                    <span class="text-gray-300">MACD (Trend)</span>
+                </label>
+
+                <label class="flex items-center space-x-2 cursor-pointer hover:bg-gray-700 p-1 rounded">
+                    <input type="checkbox" value="SMA" checked class="accent-cyan-500"> 
+                    <span class="text-gray-300">SMA (Basit Ort.)</span>
+                </label>
+
+                <label class="flex items-center space-x-2 cursor-pointer hover:bg-gray-700 p-1 rounded">
+                    <input type="checkbox" value="EMA" checked class="accent-cyan-500"> 
+                    <span class="text-gray-300">EMA (Üstel Ort.)</span>
+                </label>
+
+                <label class="flex items-center space-x-2 cursor-pointer hover:bg-gray-700 p-1 rounded">
+                    <input type="checkbox" value="Bollinger" checked class="accent-cyan-500"> 
+                    <span class="text-gray-300">Bollinger Bantları</span>
+                </label>
+
+                <label class="flex items-center space-x-2 cursor-pointer hover:bg-gray-700 p-1 rounded">
+                    <input type="checkbox" value="ATR" class="accent-cyan-500"> 
+                    <span class="text-gray-300">ATR (Volatilite)</span>
+                </label>
+
+                <label class="flex items-center space-x-2 cursor-pointer hover:bg-gray-700 p-1 rounded">
+                    <input type="checkbox" value="Stoch" class="accent-cyan-500"> 
+                    <span class="text-gray-300">Stoch Oscillator</span>
+                </label>
+
+                <label class="flex items-center space-x-2 cursor-pointer hover:bg-gray-700 p-1 rounded">
+                    <input type="checkbox" value="Returns" checked class="accent-cyan-500"> 
+                    <span class="text-gray-300">Price Returns (%)</span>
+                </label>
+
+                <label class="flex items-center space-x-2 cursor-pointer hover:bg-gray-700 p-1 rounded">
+                    <input type="checkbox" value="Lag" checked class="accent-cyan-500"> 
+                    <span class="text-gray-300">Lag (Gecikmeli Fiyat)</span>
+                </label>
+
+                <label class="flex items-center space-x-2 cursor-pointer hover:bg-gray-700 p-1 rounded">
+                    <input type="checkbox" value="Momentum" checked class="accent-cyan-500"> 
+                    <span class="text-gray-300">Momentum</span>
+                </label>
+
+                <label class="flex items-center space-x-2 cursor-pointer hover:bg-gray-700 p-1 rounded">
+                    <input type="checkbox" value="Volatility" class="accent-cyan-500"> 
+                    <span class="text-gray-300">Volatility (Std Dev)</span>
+                </label>
+
+                <label class="flex items-center space-x-2 cursor-pointer hover:bg-gray-700 p-1 rounded">
+                    <input type="checkbox" value="OBV" class="accent-cyan-500"> 
+                    <span class="text-gray-300">OBV (Hacim Dengesi)</span>
+                </label>
+                
+                <label class="flex items-center space-x-2 cursor-pointer hover:bg-gray-700 p-1 rounded">
+                    <input type="checkbox" value="ADX" checked class="accent-cyan-500"> 
+                    <span class="text-gray-300">ADX (Trend Gücü)</span>
+                </label>
+
+            </div>
+        </div>
+</div>
+
+<div id="result-card" class="mt-6 bg-gray-800 p-6 rounded-lg shadow-lg hidden">
+    <div class="flex justify-between items-center mb-6">
+        <div>
+            <h3 class="text-gray-400">7 Günlük Tahmin</h3>
+            <p id="future-prediction-text" class="text-4xl font-bold text-cyan-400">-- $</p>
+        </div>
+        <div class="text-right">
+            <span class="text-sm text-gray-500">Model:</span>
+            <p id="result-model-name" class="font-semibold text-white">--</p>
+        </div>
+    </div>
+    <div class="h-80 w-full">
+        <canvas id="predictionChart"></canvas>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+{% endblock %}

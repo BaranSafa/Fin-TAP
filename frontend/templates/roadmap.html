@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Fin-TAP - Project RoadMap{% endblock %}
+{% block header_title %}RoadMap{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    
+    <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+        <h2 class="text-2xl font-semibold mb-5 border-b border-gray-700 pb-3">Current Project Features (v1.0)</h2>
+        
+        <ul class="list-disc list-inside space-y-3 text-gray-300 text-lg">
+            <li>
+                <span class="font-semibold text-cyan-400">Dynamic Backend API:</span> A powerful API developed using Python Flask that handles all data processing and prediction requests.
+            </li>
+            <li>
+                <span class="font-semibold text-cyan-400">Advanced Machine Learning:</span> Gradient Boosting models using `XGBoost` / `LightGBM` to predict prices.
+            </li>
+            <li>
+                <span class="font-semibold text-cyan-400">Comprehensive Feature Engineering:</span> 25+ technical indicators (MACD, RSI, Bollinger Bands, Ichimoku Cloud etc.) calculated with `pandas-ta` library.
+            </li>
+            <li>
+                <span class="font-semibold text-cyan-400">Multi-Page Modern Interface:</span> Tailwind is a CSS-styled dashboard with dark mode, `Home`, `Predict`, `All Stocks` and `Suggestion` pages.
+            </li>
+            <li>
+                <span class="font-semibold text-cyan-400">Automatic Model Training:</span> Automatic training and saving of models for all stocks with the `train.py` script.
+            </li>
+             <li>
+                <span class="font-semibold text-cyan-400">Smart Routing:</span> Automatic `ticker` redirection from "All Stocks" page to "Predict" page and automatic start of the forecast.
+            </li>
+            <li>
+                <span class="font-semibold text-cyan-400">Smart Suggestion System:</span> Analysis module showing the top 3 stocks with the highest upside potential on the "Suggestion" page.
+            </li>
+            <li>
+                <span class="font-semibold text-cyan-400">Desktop Application:</span> Compiling the entire project into a single `.exe` file using `PyWebView` and `PyInstaller`.
+            </li>
+        </ul>
+    </div>
+
+    <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+        <h2 class="text-2xl font-semibold mb-5 border-b border-gray-700 pb-3">Future Plans (v2.0)</h2>
+        
+        <ul class="list-disc list-inside space-y-3 text-gray-400 text-lg">
+            <li>
+                <span class="font-semibold text-gray-200">"Prices" Page:</span> By activating the "Prices" page, you can show real-time price data using `yfinance` or a different API.
+            </li>
+            <li>
+                <span class="font-semibold text-gray-200">Advanced "All Stocks" Page:</span> Adding additional information such as company names and market capitalization to the table on the "All Stocks" page.
+            </li>
+            <li>
+                <span class="font-semibold text-gray-200">User Account:</span> A “Portfolio” system where users can save their favorite stocks.
+            </li>
+            <li>
+                <span class="font-semibold text-gray-200">More Models:</span> Integrating different time series models such as LSTM and (S)ARIMA and providing model selection feature on the "Predict" page.
+            </li>
+            <li>
+                <span class="font-semibold text-gray-200">Automatic Retraining:</span> Setting up a CI/CD pipeline that automatically retrains models on a server on a weekly basis.
+            </li>
+        </ul>
+    </div>
+
+</div>
+{% endblock %}
