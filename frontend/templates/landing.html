@@ -1,67 +1,335 @@
 <!DOCTYPE html>
-<html lang="tr">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Fin-TAP v2.0 - Geleceği Tahmin Et</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fin-TAP — AI-Powered Financial Forecasting</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg:#07090d; --surface:#0f1318; --surface2:#141920; --surface3:#1a2030;
+            --border:#1e2530; --border2:#2a3344;
+            --accent:#00d4ff; --accent-dim:rgba(0,212,255,0.07); --accent-glow:rgba(0,212,255,0.2);
+            --green:#00e676; --green-dim:rgba(0,230,118,0.07);
+            --red:#ff4560; --amber:#ffa726; --purple:#7c5cfc;
+            --text:#dde3ee; --text2:#8896ab; --text3:#4a5568;
+            --mono:'Space Mono',monospace; --sans:'Syne',sans-serif;
+        }
+        *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+        html{scroll-behavior:smooth;}
+        body{font-family:var(--sans);background:var(--bg);color:var(--text);overflow-x:hidden;}
+        body::before{
+            content:'';position:fixed;inset:0;
+            background-image:linear-gradient(rgba(0,212,255,0.022) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,255,0.022) 1px,transparent 1px);
+            background-size:48px 48px;pointer-events:none;z-index:0;
+        }
+        ::-webkit-scrollbar{width:4px;} ::-webkit-scrollbar-track{background:var(--surface);} ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
+
+        /* NAV */
+        nav{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:center;justify-content:space-between;padding:0 48px;height:60px;background:rgba(7,9,13,0.9);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);}
+        .nav-logo{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:0.9rem;font-weight:700;color:var(--accent);letter-spacing:3px;text-decoration:none;}
+        .logo-box{width:30px;height:30px;border:1.5px solid var(--accent);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:13px;background:var(--accent-dim);}
+        .nav-links{display:flex;align-items:center;gap:4px;}
+        .nav-links a{color:var(--text2);text-decoration:none;font-size:0.82rem;font-weight:600;padding:7px 14px;border-radius:6px;transition:all 0.15s;letter-spacing:0.3px;}
+        .nav-links a:hover{color:var(--text);background:var(--surface2);}
+        .nav-cta{background:var(--accent);color:#000;font-weight:800;font-size:0.8rem;padding:8px 18px;border-radius:6px;text-decoration:none;letter-spacing:0.5px;transition:all 0.15s;}
+        .nav-cta:hover{background:#fff;}
+
+        /* HERO */
+        .hero{position:relative;min-height:100vh;display:flex;align-items:center;justify-content:center;text-align:center;padding:80px 32px 60px;z-index:1;}
+        .hero-glow{position:absolute;width:700px;height:700px;border-radius:50%;background:radial-gradient(circle,rgba(0,212,255,0.06) 0%,transparent 70%);top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none;}
+        .hero-inner{position:relative;z-index:1;max-width:760px;}
+
+        .pill{display:inline-flex;align-items:center;gap:8px;background:var(--accent-dim);border:1px solid rgba(0,212,255,0.2);color:var(--accent);font-family:var(--mono);font-size:0.65rem;letter-spacing:2px;padding:5px 14px;border-radius:100px;margin-bottom:28px;}
+        .pill-dot{width:5px;height:5px;border-radius:50%;background:var(--accent);animation:pls 2s infinite;}
+        @keyframes pls{0%,100%{opacity:1;}50%{opacity:0.4;}}
+
+        h1{font-size:clamp(2.5rem,5.5vw,5rem);font-weight:800;line-height:1.05;letter-spacing:-2px;margin-bottom:20px;}
+        .h1-a{color:var(--text);}
+        .h1-b{color:var(--accent);}
+        .h1-c{color:var(--text2);}
+
+        .hero-p{font-size:1rem;color:var(--text2);max-width:520px;margin:0 auto 36px;line-height:1.7;font-weight:400;}
+
+        .cta-row{display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;}
+        .btn-hero{display:inline-flex;align-items:center;gap:8px;padding:13px 28px;font-family:var(--sans);font-weight:800;font-size:0.88rem;border-radius:8px;text-decoration:none;transition:all 0.2s;letter-spacing:0.3px;}
+        .btn-h-primary{background:var(--accent);color:#000;box-shadow:0 0 32px rgba(0,212,255,0.25);}
+        .btn-h-primary:hover{background:#fff;transform:translateY(-2px);}
+        .btn-h-secondary{background:transparent;color:var(--text);border:1px solid var(--border2);}
+        .btn-h-secondary:hover{border-color:var(--accent);color:var(--accent);}
+        .free-badge{display:inline-flex;align-items:center;gap:5px;background:var(--green-dim);border:1px solid rgba(0,230,118,0.2);color:var(--green);font-family:var(--mono);font-size:0.65rem;padding:4px 12px;border-radius:100px;}
+
+        /* DEMO WINDOW */
+        .demo-wrap{margin-top:56px;max-width:860px;margin-left:auto;margin-right:auto;}
+        .demo-window{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:0 40px 80px rgba(0,0,0,0.6);}
+        .demo-bar{background:var(--surface2);padding:12px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;}
+        .demo-dots{display:flex;gap:5px;}
+        .dd{width:9px;height:9px;border-radius:50%;}
+        .dd-r{background:#ff5f57;} .dd-y{background:#febc2e;} .dd-g{background:#28c840;}
+        .demo-bar-title{font-family:var(--mono);font-size:0.65rem;color:var(--text3);letter-spacing:1px;}
+        .demo-body{padding:20px;}
+        .demo-stats{display:flex;gap:24px;margin-bottom:16px;}
+        .ds-label{font-family:var(--mono);font-size:0.55rem;color:var(--text3);letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;}
+        .ds-val{font-family:var(--mono);font-size:0.95rem;font-weight:700;}
+
+        /* TICKER */
+        .ticker-wrap{position:relative;z-index:1;overflow:hidden;border-top:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--surface);padding:11px 0;}
+        .ticker-inner{display:flex;gap:48px;animation:scroll 28s linear infinite;width:max-content;}
+        .ti-item{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:0.72rem;white-space:nowrap;}
+        .ti-sym{color:var(--text);font-weight:700;} .ti-price{color:var(--text3);} .ti-up{color:var(--green);} .ti-dn{color:var(--red);}
+        @keyframes scroll{from{transform:translateX(0);}to{transform:translateX(-50%);}}
+
+        /* STATS ROW */
+        .stats-row{display:flex;max-width:860px;margin:0 auto;position:relative;z-index:1;}
+        .sr-item{flex:1;text-align:center;padding:36px 20px;border-right:1px solid var(--border);}
+        .sr-item:last-child{border-right:none;}
+        .sr-num{font-family:var(--mono);font-size:2.2rem;font-weight:700;color:var(--accent);display:block;margin-bottom:6px;}
+        .sr-label{font-size:0.72rem;color:var(--text2);letter-spacing:1px;text-transform:uppercase;}
+
+        /* SECTIONS */
+        .section{position:relative;z-index:1;padding:80px 48px;max-width:1100px;margin:0 auto;}
+        .sec-tag{font-family:var(--mono);font-size:0.6rem;letter-spacing:3px;color:var(--accent);margin-bottom:12px;}
+        .sec-h{font-size:clamp(1.6rem,3vw,2.6rem);font-weight:800;letter-spacing:-1px;margin-bottom:14px;}
+        .sec-p{color:var(--text2);font-size:0.9rem;max-width:480px;line-height:1.7;}
+
+        /* FEATURES */
+        .feat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-top:44px;background:var(--border);border:1px solid var(--border);border-radius:12px;overflow:hidden;}
+        .feat-card{background:var(--surface);padding:32px;position:relative;overflow:hidden;transition:background 0.2s;}
+        .feat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--accent),transparent);opacity:0;transition:opacity 0.25s;}
+        .feat-card:hover{background:var(--surface2);}
+        .feat-card:hover::before{opacity:1;}
+        .feat-ico{width:44px;height:44px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:19px;margin-bottom:16px;border:1px solid var(--border2);}
+        .ic-a{background:var(--accent-dim);border-color:rgba(0,212,255,0.2);}
+        .ic-p{background:rgba(124,92,252,0.07);border-color:rgba(124,92,252,0.2);}
+        .ic-g{background:var(--green-dim);border-color:rgba(0,230,118,0.2);}
+        .ic-o{background:rgba(255,167,38,0.07);border-color:rgba(255,167,38,0.2);}
+        .feat-t{font-size:0.95rem;font-weight:700;margin-bottom:8px;}
+        .feat-d{font-size:0.82rem;color:var(--text2);line-height:1.6;}
+        .feat-tag{display:inline-block;margin-top:14px;font-family:var(--mono);font-size:0.6rem;color:var(--accent);background:var(--accent-dim);border:1px solid rgba(0,212,255,0.15);padding:2px 9px;border-radius:3px;letter-spacing:1px;}
+
+        /* MODELS */
+        .model-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-top:36px;}
+        .model-pill{background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:18px;text-align:center;transition:all 0.2s;cursor:default;}
+        .model-pill:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,212,255,0.1);}
+        .mp-name{font-family:var(--mono);font-weight:700;font-size:0.75rem;color:var(--accent);margin-bottom:5px;}
+        .mp-type{font-size:0.7rem;color:var(--text2);}
+
+        /* PRICING */
+        .price-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:44px;}
+        .pc{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:28px;display:flex;flex-direction:column;position:relative;transition:all 0.2s;}
+        .pc:hover{transform:translateY(-3px);}
+        .pc.featured{border-color:var(--accent);background:linear-gradient(160deg,rgba(0,212,255,0.03),var(--surface));}
+        .pc-hot{position:absolute;top:-11px;left:50%;transform:translateX(-50%);background:var(--accent);color:#000;font-family:var(--mono);font-size:0.58rem;font-weight:700;letter-spacing:2px;padding:3px 14px;border-radius:100px;white-space:nowrap;}
+        .pc-tag{font-family:var(--mono);font-size:0.58rem;letter-spacing:2px;color:var(--text3);margin-bottom:8px;}
+        .pc-name{font-size:1.1rem;font-weight:800;margin-bottom:6px;}
+        .pc-price{font-family:var(--mono);font-size:2.2rem;font-weight:700;margin-bottom:16px;}
+        .pc-price span{font-size:0.8rem;color:var(--text2);}
+        .pc-features{flex:1;list-style:none;margin-bottom:20px;}
+        .pc-features li{display:flex;align-items:center;gap:8px;font-size:0.8rem;color:var(--text2);padding:6px 0;border-bottom:1px solid var(--border);}
+        .pc-features li:last-child{border-bottom:none;}
+        .pcc{color:var(--green);} .pcx{color:var(--text3);}
+        .pc-btn{display:block;text-align:center;padding:11px;border-radius:7px;font-weight:700;font-size:0.85rem;text-decoration:none;transition:all 0.2s;border:1px solid var(--border2);color:var(--text2);}
+        .pc-btn:hover{border-color:var(--accent);color:var(--accent);}
+        .pc-btn.primary{background:var(--accent);color:#000;border:none;}
+        .pc-btn.primary:hover{background:#fff;}
+
+        /* CTA */
+        .cta-section{position:relative;z-index:1;text-align:center;padding:100px 48px;overflow:hidden;}
+        .cta-section::before{content:'';position:absolute;width:800px;height:400px;background:radial-gradient(ellipse,rgba(0,212,255,0.05) 0%,transparent 70%);top:50%;left:50%;transform:translate(-50%,-50%);}
+        .cta-h{font-size:clamp(1.8rem,4vw,3.2rem);font-weight:800;letter-spacing:-1.5px;margin-bottom:16px;}
+
+        /* FOOTER */
+        footer{position:relative;z-index:1;border-top:1px solid var(--border);padding:28px 48px;display:flex;align-items:center;justify-content:space-between;}
+        .footer-logo{font-family:var(--mono);font-weight:700;font-size:0.85rem;color:var(--accent);letter-spacing:2px;}
+        .footer-copy{font-size:0.75rem;color:var(--text3);}
+
+        @keyframes fadeUp{from{opacity:0;transform:translateY(20px);}to{opacity:1;transform:translateY(0);}}
+        .fade-1{animation:fadeUp 0.6s ease 0s both;}
+        .fade-2{animation:fadeUp 0.6s ease 0.1s both;}
+        .fade-3{animation:fadeUp 0.6s ease 0.2s both;}
+        .fade-4{animation:fadeUp 0.6s ease 0.3s both;}
+    </style>
 </head>
-<body class="bg-gray-900 text-white font-sans">
+<body>
 
-    <nav class="flex justify-between items-center p-6 bg-gray-800 border-b border-gray-700">
-        <div class="text-2xl font-bold text-cyan-400 tracking-wider">
-            <i class="fa-solid fa-chart-line mr-2"></i>Fin-TAP
-        </div>
-        <div>
-            <a href="/login" class="px-4 py-2 text-gray-300 hover:text-white transition">Giriş Yap</a>
-            <a href="/register" class="ml-4 px-6 py-2 bg-cyan-600 hover:bg-cyan-500 rounded-full font-bold transition shadow-lg shadow-cyan-500/30">
-                Kayıt Ol
-            </a>
-        </div>
-    </nav>
+<!-- NAV -->
+<nav>
+    <a href="/" class="nav-logo"><div class="logo-box">▲</div>FIN-TAP</a>
+    <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#models">Models</a>
+        <a href="#pricing">Pricing</a>
+        <a href="/login">Sign In</a>
+        <a href="/register" class="nav-cta">START FREE →</a>
+    </div>
+</nav>
 
-    <header class="container mx-auto mt-20 text-center px-4">
-        <h1 class="text-5xl md:text-7xl font-extrabold mb-6 bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 to-blue-600">
-            Yapay Zeka ile <br> Finansal Öngörü
+<!-- HERO -->
+<section class="hero">
+    <div class="hero-glow"></div>
+    <div class="hero-inner">
+        <div class="pill fade-1"><span class="pill-dot"></span>GRADUATION PROJECT · AI FINANCIAL FORECASTING</div>
+        <h1 class="fade-2">
+            <div class="h1-a">Predict Markets</div>
+            <div class="h1-b">with Machine Learning</div>
+            <div class="h1-c">Before They Move</div>
         </h1>
-        <p class="text-xl text-gray-400 mb-10 max-w-2xl mx-auto">
-            Borsa ve Kripto paraların geleceğini 14 günlük tahminlerle görün. 
-            LSTM ve XGBoost algoritmaları ile yatırımlarınıza yön verin.
-        </p>
-        
-        <div class="flex justify-center gap-6">
-            <a href="/register" class="px-8 py-4 bg-gradient-to-r from-cyan-600 to-blue-600 rounded-lg text-lg font-bold hover:scale-105 transition transform shadow-xl">
-                Hemen Başla (5 Token Hediye)
-            </a>
-            <a href="#features" class="px-8 py-4 border border-gray-600 rounded-lg text-lg font-bold hover:bg-gray-800 transition">
-                Nasıl Çalışır?
-            </a>
+        <p class="hero-p fade-3">Fin-TAP runs LSTM, XGBoost, and LightGBM on live OHLCV data to generate 14-day price forecasts for 31 tracked stocks — instantly.</p>
+        <div class="cta-row fade-4">
+            <a href="/register" class="btn-hero btn-h-primary">🚀 Get Started Free</a>
+            <a href="#features" class="btn-hero btn-h-secondary">How It Works</a>
+            <div class="free-badge">✦ 5 free tokens on signup</div>
         </div>
-    </header>
 
-    <section id="features" class="container mx-auto mt-32 grid md:grid-cols-3 gap-8 px-4 mb-20">
-        <div class="bg-gray-800 p-8 rounded-2xl border border-gray-700 hover:border-cyan-500 transition duration-300 group">
-            <div class="text-4xl text-cyan-400 mb-4 group-hover:scale-110 transition duration-300">
-                <i class="fa-brands fa-bitcoin"></i>
+        <!-- Demo window -->
+        <div class="demo-wrap fade-4">
+            <div class="demo-window">
+                <div class="demo-bar">
+                    <div class="demo-dots"><div class="dd dd-r"></div><div class="dd dd-y"></div><div class="dd dd-g"></div></div>
+                    <div class="demo-bar-title">AAPL — 14-DAY AI FORECAST — XGBOOST MODEL</div>
+                    <div class="demo-bar-title">LIVE</div>
+                </div>
+                <div class="demo-body">
+                    <div class="demo-stats">
+                        <div><div class="ds-label">Current</div><div class="ds-val" style="color:var(--accent);">$213.40</div></div>
+                        <div><div class="ds-label">14D Target</div><div class="ds-val" style="color:var(--green);">$221.84</div></div>
+                        <div><div class="ds-label">RSI(14)</div><div class="ds-val" style="color:var(--amber);">47.2</div></div>
+                        <div><div class="ds-label">Signal</div><div class="ds-val" style="color:var(--green);">BUY ↑</div></div>
+                        <div><div class="ds-label">Return</div><div class="ds-val" style="color:var(--green);">+3.96%</div></div>
+                    </div>
+                    <canvas id="demoChart" style="width:100%;height:180px;"></canvas>
+                </div>
             </div>
-            <h3 class="text-2xl font-bold mb-3">Kripto & Borsa</h3>
-            <p class="text-gray-400">Binance ve NASDAQ verilerini canlı çekip analiz ediyoruz. Tek platformda tüm varlıklar.</p>
         </div>
-        <div class="bg-gray-800 p-8 rounded-2xl border border-gray-700 hover:border-cyan-500 transition duration-300 group">
-            <div class="text-4xl text-purple-400 mb-4 group-hover:scale-110 transition duration-300">
-                <i class="fa-solid fa-brain"></i>
-            </div>
-            <h3 class="text-2xl font-bold mb-3">AI Tahmin Motoru</h3>
-            <p class="text-gray-400">Geçmiş 5 yıllık veriyi LSTM sinir ağları ile işleyip 14 günlük fiyat tahmini sunuyoruz.</p>
-        </div>
-        <div class="bg-gray-800 p-8 rounded-2xl border border-gray-700 hover:border-cyan-500 transition duration-300 group">
-            <div class="text-4xl text-green-400 mb-4 group-hover:scale-110 transition duration-300">
-                <i class="fa-solid fa-coins"></i>
-            </div>
-            <h3 class="text-2xl font-bold mb-3">Token Sistemi</h3>
-            <p class="text-gray-400">Sadece kullandığın kadar öde. Üyelere özel cüzdan sistemi ile bütçeni yönet.</p>
-        </div>
-    </section>
+    </div>
+</section>
 
+<!-- TICKER -->
+<div class="ticker-wrap">
+    <div class="ticker-inner" id="ticker-tape"></div>
+</div>
+
+<!-- STATS -->
+<div style="position:relative;z-index:1;border-bottom:1px solid var(--border);">
+    <div class="stats-row">
+        <div class="sr-item"><span class="sr-num">31</span><span class="sr-label">Tracked Stocks</span></div>
+        <div class="sr-item"><span class="sr-num">5</span><span class="sr-label">ML Models</span></div>
+        <div class="sr-item"><span class="sr-num">25+</span><span class="sr-label">Tech Indicators</span></div>
+        <div class="sr-item"><span class="sr-num">14D</span><span class="sr-label">Forecast Window</span></div>
+        <div class="sr-item"><span class="sr-num">5Y</span><span class="sr-label">Training Data</span></div>
+    </div>
+</div>
+
+<!-- FEATURES -->
+<section class="section" id="features">
+    <div class="sec-tag">// CAPABILITIES</div>
+    <div class="sec-h">Everything You Need<br>to Trade Smarter</div>
+    <div class="sec-p">From raw market data to AI-generated forecasts — the entire pipeline runs in seconds.</div>
+    <div class="feat-grid">
+        <div class="feat-card"><div class="feat-ico ic-a">📈</div><div class="feat-t">Live Market Data</div><div class="feat-d">Real-time OHLCV from Yahoo Finance covering NASDAQ & NYSE. Sub-minute data freshness on every request.</div><span class="feat-tag">yfinance API</span></div>
+        <div class="feat-card"><div class="feat-ico ic-p">🧠</div><div class="feat-t">Deep Learning Engine</div><div class="feat-d">LSTM neural networks trained on 5-year histories to capture temporal dependencies in price action.</div><span class="feat-tag">TensorFlow / Keras</span></div>
+        <div class="feat-card"><div class="feat-ico ic-g">⚡</div><div class="feat-t">Gradient Boosting</div><div class="feat-d">XGBoost and LightGBM provide fast ensemble predictions with high accuracy on structured data.</div><span class="feat-tag">XGBoost / LightGBM</span></div>
+        <div class="feat-card"><div class="feat-ico ic-o">📊</div><div class="feat-t">25+ Indicators</div><div class="feat-d">RSI, MACD, Bollinger, ATR, Stochastic, OBV, ADX — all dynamically selectable as model inputs.</div><span class="feat-tag">pandas / numpy</span></div>
+        <div class="feat-card"><div class="feat-ico ic-a">⚖️</div><div class="feat-t">Asset Comparison</div><div class="feat-d">Side-by-side AI predictions for two stocks with return potential, risk scores, and RSI analysis.</div><span class="feat-tag">Multi-asset</span></div>
+        <div class="feat-card"><div class="feat-ico ic-p">🪙</div><div class="feat-t">Token Economy</div><div class="feat-d">Pay-per-prediction SaaS model. Each forecast costs 1 token. Start with 5 free on signup.</div><span class="feat-tag">Flask / SQLAlchemy</span></div>
+    </div>
+</section>
+
+<!-- MODELS -->
+<section class="section" id="models" style="padding-top:0;">
+    <div class="sec-tag">// AI MODELS</div>
+    <div class="sec-h">Five Models,<br>One Platform</div>
+    <div class="sec-p">Select the right algorithm for each analysis. From fast linear models to deep LSTM networks.</div>
+    <div class="model-grid">
+        <div class="model-pill"><div class="mp-name">LINEAR</div><div class="mp-type">Regression · Fast</div></div>
+        <div class="model-pill"><div class="mp-name">RANDOM FOREST</div><div class="mp-type">Ensemble · Balanced</div></div>
+        <div class="model-pill"><div class="mp-name">XGBOOST</div><div class="mp-type">Gradient Boost · Best</div></div>
+        <div class="model-pill"><div class="mp-name">LIGHTGBM</div><div class="mp-type">Gradient Boost · Fast</div></div>
+        <div class="model-pill"><div class="mp-name">LSTM</div><div class="mp-type">Deep Learning · Accurate</div></div>
+    </div>
+</section>
+
+<!-- PRICING -->
+<section class="section" id="pricing" style="padding-top:0;">
+    <div class="sec-tag">// PRICING</div>
+    <div class="sec-h">Simple, Transparent Pricing</div>
+    <div class="sec-p">Start free. Upgrade for unlimited predictions and advanced models.</div>
+    <div class="price-grid">
+        <div class="pc">
+            <div class="pc-tag">// FREE</div>
+            <div class="pc-name">Starter</div>
+            <div class="pc-price">$0 <span>/ month</span></div>
+            <ul class="pc-features">
+                <li><span class="pcc">✓</span> 5 tokens on signup</li>
+                <li><span class="pcc">✓</span> All 31 stocks</li>
+                <li><span class="pcc">✓</span> Linear & Random Forest</li>
+                <li><span class="pcc">✓</span> Dashboard & comparison</li>
+                <li><span class="pcx">✕</span> LSTM / XGBoost / LightGBM</li>
+            </ul>
+            <a href="/register" class="pc-btn primary">Get Started Free</a>
+        </div>
+        <div class="pc featured">
+            <div class="pc-hot">MOST POPULAR</div>
+            <div class="pc-tag">// PRO</div>
+            <div class="pc-name" style="color:var(--accent);">Professional</div>
+            <div class="pc-price">$15 <span>/ month</span></div>
+            <ul class="pc-features">
+                <li><span class="pcc">✓</span> Unlimited tokens</li>
+                <li><span class="pcc">✓</span> All S&P 500 stocks</li>
+                <li><span class="pcc">✓</span> All 5 ML models</li>
+                <li><span class="pcc">✓</span> Priority data refresh</li>
+                <li><span class="pcc">✓</span> Favorites portfolio</li>
+            </ul>
+            <a href="#" class="pc-btn" style="opacity:0.5;cursor:not-allowed;">Coming Soon</a>
+        </div>
+        <div class="pc">
+            <div class="pc-tag">// ENTERPRISE</div>
+            <div class="pc-name">Enterprise</div>
+            <div class="pc-price" style="font-size:1.4rem;line-height:3.2rem;">Contact Us</div>
+            <ul class="pc-features">
+                <li><span class="pcc">✓</span> Everything in Pro</li>
+                <li><span class="pcc">✓</span> Direct prediction API</li>
+                <li><span class="pcc">✓</span> Custom model training</li>
+                <li><span class="pcc">✓</span> SLA & priority support</li>
+                <li><span class="pcc">✓</span> White-label UI</li>
+            </ul>
+            <a href="#" class="pc-btn">Contact</a>
+        </div>
+    </div>
+</section>
+
+<!-- CTA -->
+<section class="cta-section">
+    <div class="sec-tag" style="text-align:center;">// GET STARTED</div>
+    <div class="cta-h">Ready to See the Future?</div>
+    <p style="color:var(--text2);max-width:440px;margin:0 auto 36px;line-height:1.7;font-size:0.9rem;">Sign up in seconds. No credit card required. Get 5 free tokens and run your first AI prediction immediately.</p>
+    <a href="/register" class="btn-hero btn-h-primary">🚀 Create Free Account</a>
+</section>
+
+<!-- FOOTER -->
+<footer>
+    <div class="footer-logo">▲ FIN-TAP</div>
+    <div class="footer-copy">© 2026 Fin-TAP · Graduation Project · AI Financial Analysis Platform · Built with Flask · Python · TensorFlow</div>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+// Demo chart
+const ctx = document.getElementById('demoChart').getContext('2d');
+const labels = [], actual = [], predicted = [];
+const base = 213.4, today = new Date();
+for(let i=20;i>=0;i--){const d=new Date(today);d.setDate(d.getDate()-i);labels.push(d.toLocaleDateString('en-US',{month:'short',day:'numeric'}));actual.push(+(base+(Math.random()-0.5)*8+(20-i)*0.2).toFixed(2));predicted.push(null);}
+let lp=actual[actual.length-1];
+for(let i=1;i<=14;i++){const d=new Date(today);d.setDate(d.getDate()+i);labels.push(d.toLocaleDateString('en-US',{month:'short',day:'numeric'}));lp+=(Math.random()*1.1-0.25);actual.push(null);predicted.push(+lp.toFixed(2));}
+
+new Chart(ctx,{type:'line',data:{labels,datasets:[{data:actual,borderColor:'#00d4ff',backgroundColor:'rgba(0,212,255,0.05)',borderWidth:1.5,pointRadius:0,fill:true,tension:0.35},{data:predicted,borderColor:'#ffa726',borderDash:[4,4],borderWidth:1.5,pointRadius:0,fill:false,tension:0.35}]},options:{responsive:true,maintainAspectRatio:false,animation:{duration:1000},plugins:{legend:{display:false},tooltip:{backgroundColor:'#0f1318',borderColor:'#1e2530',borderWidth:1,titleColor:'#8896ab',bodyColor:'#dde3ee',titleFont:{family:'Space Mono',size:9},bodyFont:{family:'Space Mono',size:10}}},scales:{x:{ticks:{color:'#4a5568',maxTicksLimit:7,font:{family:'Space Mono',size:9}},grid:{display:false},border:{display:false}},y:{ticks:{color:'#4a5568',font:{family:'Space Mono',size:9},callback:v=>'$'+v.toFixed(0)},grid:{color:'rgba(255,255,255,0.03)'},border:{display:false}}}}});
+
+// Ticker
+const tickers=[{sym:'AAPL',price:'213.40',chg:'+1.24%',up:true},{sym:'TSLA',price:'248.70',chg:'-0.83%',up:false},{sym:'NVDA',price:'875.21',chg:'+3.17%',up:true},{sym:'MSFT',price:'421.50',chg:'+0.55%',up:true},{sym:'GOOG',price:'172.30',chg:'-0.21%',up:false},{sym:'AMZN',price:'193.80',chg:'+1.05%',up:true},{sym:'AMD',price:'162.45',chg:'+2.38%',up:true},{sym:'NFLX',price:'641.20',chg:'-1.12%',up:false},{sym:'INTC',price:'34.80',chg:'-0.44%',up:false},{sym:'SQ',price:'72.15',chg:'+0.98%',up:true}];
+const tape=document.getElementById('ticker-tape');
+const mk=items=>items.map(t=>`<div class="ti-item"><span class="ti-sym">${t.sym}</span><span class="ti-price">$${t.price}</span><span class="${t.up?'ti-up':'ti-dn'}">${t.chg}</span></div>`).join('');
+tape.innerHTML=mk(tickers)+mk(tickers);
+</script>
 </body>
 </html>

@@ -1,43 +1,98 @@
 {% extends "base.html" %}
-
-{% block title %}Fin-TAP - All Stocks{% endblock %}
-{% block header_title %}All Stocks{% endblock %}
+{% block title %}All Stocks — Fin-TAP{% endblock %}
+{% block header_title %}All Tracked Instruments{% endblock %}
+{% block header_sub %}{{ stocks|length }} INSTRUMENTS · CLICK ANY TICKER TO FORECAST{% endblock %}
 
 {% block content %}
-    <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
-        <h2 class="text-2xl font-semibold mb-4">Trained Models</h2>
-        
-        {% if stocks %} <p class="text-gray-400 mb-6">You can get price predictions for the following stocks from the 'Predict' page. (Total: {{ stocks|length }})</p>
-            
-            <div class="overflow-x-auto rounded-lg border border-gray-700">
-                <table class="min-w-full divide-y divide-gray-700">
-                    <thead class="bg-gray-700">
-                        <tr>
-                            <th scope="col" class="py-3.5 px-4 text-left text-lg font-semibold text-gray-200">Stock Ticker (Ticker)</th>
-                            <th scope="col" class="relative py-3.5 px-4">
-                                <span class="sr-only">İşlem</span>
-                            </th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-gray-700 bg-gray-800">
-                        
-                        {% for ticker in stocks %}
-                        <tr>
-                            <td class="whitespace-nowrap py-4 px-4 text-lg font-medium text-cyan-400">{{ ticker }}</td>
-                            <td class="whitespace-nowrap py-4 px-4 text-right text-lg font-medium">
-                                <a href="{{ url_for('predict') }}?ticker={{ ticker }}" class="text-cyan-400 hover:text-cyan-300">
-                                    Guess &rarr;
-                                </a>
-                            </td>
-                        </tr>
-                        {% endfor %} </tbody>
-                </table>
-            </div>
+<style>
+    .stock-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 12px 14px;
+        display: flex; align-items: center; justify-content: space-between;
+        text-decoration: none;
+        transition: all 0.15s;
+        position: relative;
+        overflow: hidden;
+    }
+    .stock-card::before {
+        content: '';
+        position: absolute; left: 0; top: 0; bottom: 0;
+        width: 3px;
+        background: var(--accent);
+        transform: scaleY(0);
+        transition: transform 0.15s;
+        border-radius: 0 2px 2px 0;
+    }
+    .stock-card:hover { border-color: rgba(0,212,255,0.25); background: var(--surface2); }
+    .stock-card:hover::before { transform: scaleY(1); }
 
-        {% else %} <div class_alias="bg-yellow-900 border border-yellow-700 text-yellow-200 p-4 rounded-lg">
-                <h3 class="font-bold">Model Bulunamadı</h3>
-                <p>No trained models (`_scaler.joblib` file) were found in the 'models/' folder. Please run the `train.py` script first.</p>
-            </div>
+    .sc-ticker { font-family: var(--mono); font-weight: 700; font-size: 0.85rem; color: var(--accent); }
+    .sc-idx    { font-family: var(--mono); font-size: 0.6rem; color: var(--text3); }
+    .sc-arrow  { color: var(--text3); font-size: 0.8rem; transition: all 0.15s; }
+    .stock-card:hover .sc-arrow { color: var(--accent); transform: translateX(3px); }
 
-        {% endif %} </div>
+    .search-wrap { position: relative; margin-bottom: 16px; }
+    .search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text3); font-size: 0.85rem; }
+    #search-input {
+        width: 100%; background: var(--surface); border: 1px solid var(--border);
+        color: var(--text); padding: 10px 14px 10px 36px;
+        border-radius: 7px; font-size: 0.85rem; outline: none;
+        transition: border-color 0.2s; font-family: var(--sans);
+    }
+    #search-input:focus { border-color: var(--accent); }
+    #search-input::placeholder { color: var(--text3); }
+
+    .count-label { font-family: var(--mono); font-size: 0.65rem; color: var(--text3); margin-bottom: 12px; }
+</style>
+
+<div class="fade-up">
+    <!-- Search -->
+    <div class="search-wrap">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="search-input" placeholder="Search ticker (e.g. AAPL, TSLA...)" oninput="filterStocks()">
+    </div>
+
+    <div class="count-label">SHOWING <span id="showing-count">{{ stocks|length }}</span> OF {{ stocks|length }} INSTRUMENTS</div>
+
+    <!-- Grid -->
+    <div id="stocks-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+        {% for t in stocks %}
+        <a href="/predict?ticker={{ t }}" class="stock-card" data-ticker="{{ t }}">
+            <div>
+                <div class="sc-ticker">{{ t }}</div>
+                <div class="sc-idx">NASDAQ</div>
+            </div>
+            <span class="sc-arrow">→</span>
+        </a>
+        {% endfor %}
+    </div>
+
+    <!-- Empty state -->
+    <div id="no-results" style="display:none; text-align:center; padding:48px;">
+        <div style="font-size:2rem; margin-bottom:10px;">🔍</div>
+        <div style="font-weight:700; margin-bottom:6px;">No results found</div>
+        <div style="color:var(--text2); font-size:0.82rem;">Try a different ticker symbol.</div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function filterStocks() {
+    const q     = document.getElementById('search-input').value.toUpperCase().trim();
+    const cards = document.querySelectorAll('#stocks-grid .stock-card');
+    let visible = 0;
+
+    cards.forEach(card => {
+        const match = card.dataset.ticker.includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visible++;
+    });
+
+    document.getElementById('showing-count').textContent = visible;
+    document.getElementById('no-results').style.display  = visible === 0 ? 'block' : 'none';
+}
+</script>
 {% endblock %}

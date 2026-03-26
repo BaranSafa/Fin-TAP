@@ -1,33 +1,57 @@
 import os
+import sys
+import json
 from flask import Flask, render_template, redirect, url_for, flash, request, jsonify
-from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_cors import CORS
+from datetime import datetime
 
-# models.py dosyasından tabloları çekiyoruz
-from models import db, User, Wallet, Transaction
+# --- MODELLER ---
+from models import db, User, Wallet, Transaction, Prediction
 
+# Backend klasörünü ve ana dizini yola ekle
+sys.path.append(os.path.join(os.path.dirname(__file__), 'backend'))
+sys.path.append(os.path.dirname(__file__))
+
+try:
+    from train import TICKERS_TO_TRAIN
+    from backend.dynamic_trainer import train_and_predict_dynamic
+    from backend.model_manager import get_suggestion_metrics
+    from backend.data_manager import get_processed_data
+except ImportError as e:
+    print(f"KRİTİK HATA: Backend dosyaları bulunamadı! {e}")
+    TICKERS_TO_TRAIN = []
+
+# ── HELPER: her login_required sayfada wallet lazım ──
+def get_wallet():
+    wallet = Wallet.query.filter_by(user_id=current_user.id).first()
+    if not wallet:
+        wallet = Wallet(user_id=current_user.id, balance=5)
+        db.session.add(wallet)
+        db.session.commit()
+    return wallet
+
+# ========================================================
+# APP SETUP
+# ========================================================
 app = Flask(__name__, template_folder='frontend/templates', static_folder='frontend/static')
+app.config['SECRET_KEY'] = 'fin-tap-graduation-secret-v2'
 
-# --- AYARLAR (CONFIG) ---
-app.config['SECRET_KEY'] = 'bu_cok_gizli_bir_anahtardir_fin_tap_v2_enterprise'
-
-# Veritabanı Ayarı: Render'daysa orayı kullan, yoksa yerel dosyayı kullan
-database_url = os.environ.get('DATABASE_URL', 'sqlite:///fintap.db')
-# Render'ın verdiği postgres:// adresini postgresql:// yap (SQLAlchemy uyumu için)
-if database_url.startswith("postgres://"):
+database_url = os.environ.get('DATABASE_URL')
+if database_url and database_url.startswith("postgres://"):
     database_url = database_url.replace("postgres://", "postgresql://", 1)
-app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+else:
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///fintap.db'
+
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# Eklentileri Başlat
 CORS(app)
 db.init_app(app)
 
-# --- LOGIN MANAGER (Kullanıcı Giriş Yönetimi) ---
 login_manager = LoginManager()
-login_manager.login_view = 'login' # Giriş yapmamış biri dashboard'a girmeye çalışırsa buraya at
+login_manager.login_view = 'login'
 login_manager.init_app(app)
 
 @login_manager.user_loader
@@ -35,158 +59,244 @@ def load_user(user_id):
     return User.query.get(int(user_id))
 
 # ========================================================
-# 1. GUEST STATE & YÖNLENDİRME MANTIĞI
+# SAYFA ROTALARI
 # ========================================================
 
+# BUG FIX: / artık 'dashboard' yerine doğrudan home.html render ediyor
 @app.route('/')
-def index():
-    """
-    Ana yönlendirme merkezi.
-    - Kullanıcı giriş yapmışsa -> Dashboard'a (Authenticated State)
-    - Yapmamışsa -> Landing Page'e (Guest State)
-    """
+def root():
     if current_user.is_authenticated:
-        return redirect(url_for('dashboard'))
+        wallet = get_wallet()
+        return render_template('home.html',
+                               user=current_user,
+                               balance=wallet.balance,
+                               stocks=TICKERS_TO_TRAIN)
     return render_template('landing.html')
 
-# ========================================================
-# 2. AUTHENTICATED STATE (Üye Alanı)
-# ========================================================
-
+# /dashboard da çalışsın (sidebar linkleri için)
 @app.route('/dashboard')
-@login_required  # Sadece üyeler girebilir
-def dashboard():
-    # Kullanıcının cüzdanını bul
-    wallet = Wallet.query.filter_by(user_id=current_user.id).first()
-    
-    # Eğer cüzdan yoksa (hata durumu), hemen oluştur
-    if not wallet:
-        wallet = Wallet(user_id=current_user.id, balance=5)
-        db.session.add(wallet)
-        db.session.commit()
-    
-    # Dashboard sayfasına bakiye bilgisini gönder
-    return render_template('dashboard.html', balance=wallet.balance, user=current_user)
-
-# ========================================================
-# 3. RESTRICTED & PROCESSING STATE (İşlem Mantığı)
-# ========================================================
-
-@app.route('/api/predict_check', methods=['POST'])
 @login_required
-def predict_check():
-    """
-    Bu API, kullanıcı 'Analiz Et' butonuna bastığında çağrılır.
-    RESTRICTED STATE kontrolü burada yapılır.
-    """
-    wallet = Wallet.query.filter_by(user_id=current_user.id).first()
-    
-    # --- KONTROL: RESTRICTED STATE ---
-    if wallet.balance <= 0:
-        return jsonify({
-            "status": "restricted",
-            "message": "Yetersiz Bakiye! Analiz yapmak için Token satın almalısınız."
-        }), 402  # 402 Payment Required kodu
+def dashboard():
+    wallet = get_wallet()
+    return render_template('home.html',
+                           user=current_user,
+                           balance=wallet.balance,
+                           stocks=TICKERS_TO_TRAIN)
 
-    # --- İŞLEM: PROCESSING STATE ---
-    # Bakiyesi var, 1 Token düş
-    wallet.balance -= 1
-    
-    # (Opsiyonel) İşlem geçmişine kaydet
-    # new_tx = Transaction(user_id=current_user.id, amount_paid=0, tokens_added=-1)
-    # db.session.add(new_tx)
-    
-    db.session.commit()
-    
+@app.route('/predict')
+@login_required
+def predict():
+    wallet = get_wallet()
+    ticker = request.args.get('ticker', 'AAPL')
+    return render_template('predict.html',
+                           user=current_user,
+                           balance=wallet.balance,
+                           trained_stocks=TICKERS_TO_TRAIN,
+                           ticker_from_url=ticker)
+
+@app.route('/compare')
+@login_required
+def compare():
+    wallet = get_wallet()
+    return render_template('compare.html',
+                           user=current_user,
+                           balance=wallet.balance,
+                           stocks=TICKERS_TO_TRAIN)
+
+# BUG FIX: user ve balance eklendi
+@app.route('/all_stocks')
+@login_required
+def all_stocks():
+    wallet = get_wallet()
+    return render_template('all_stocks.html',
+                           user=current_user,
+                           balance=wallet.balance,
+                           stocks=TICKERS_TO_TRAIN)
+
+# BUG FIX: user ve balance eklendi, login_required eklendi
+@app.route('/roadmap')
+@login_required
+def roadmap():
+    wallet = get_wallet()
+    return render_template('roadmap.html',
+                           user=current_user,
+                           balance=wallet.balance)
+
+# BUG FIX: user ve balance eklendi, login_required eklendi
+@app.route('/prices')
+@login_required
+def prices():
+    wallet = get_wallet()
+    return render_template('prices.html',
+                           user=current_user,
+                           balance=wallet.balance)
+
+@app.route('/profile')
+@login_required
+def profile():
+    wallet = get_wallet()
+    transactions = Transaction.query.filter_by(user_id=current_user.id).order_by(Transaction.date.desc()).all()
+    predictions  = Prediction.query.filter_by(user_id=current_user.id).order_by(Prediction.created_at.desc()).all()
+    return render_template('profile.html',
+                           user=current_user,
+                           wallet=wallet,
+                           balance=wallet.balance,
+                           transactions=transactions,
+                           predictions=predictions)
+
+# ========================================================
+# API ENDPOINTS
+# ========================================================
+
+@app.route('/api/market_summary')
+@login_required
+def api_market_summary():
+    summary_data = []
+    limit = 12
+    for ticker in TICKERS_TO_TRAIN[:limit]:
+        try:
+            df = get_processed_data(ticker)
+            if df is not None and not df.empty:
+                current_price = float(df['Close'].iloc[-1])
+                prev_price    = float(df['Close'].iloc[-2])
+                change = ((current_price - prev_price) / prev_price) * 100
+                summary_data.append({
+                    'ticker': ticker,
+                    'price':  round(current_price, 2),
+                    'change': round(change, 2),
+                    'trend':  'up' if change >= 0 else 'down'
+                })
+        except Exception as e:
+            print(f"market_summary hata ({ticker}): {e}")
+            continue
+    return jsonify(summary_data)
+
+
+@app.route('/api/history/<ticker>')
+@login_required
+def api_history(ticker):
+    try:
+        df = get_processed_data(ticker)
+        if df is None or df.empty:
+            return jsonify({'error': 'Veri yok'}), 404
+        recent_df = df.tail(100)
+        return jsonify({
+            'dates':  [d.strftime('%Y-%m-%d') for d in recent_df.index],
+            'prices': [round(float(p), 2) for p in recent_df['Close'].tolist()]
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/compare_stocks')
+@login_required
+def api_compare():
+    t1 = request.args.get('ticker1')
+    t2 = request.args.get('ticker2')
+    if not t1 or not t2:
+        return jsonify({'error': 'Eksik parametre'}), 400
+    m1 = get_suggestion_metrics(t1)
+    m2 = get_suggestion_metrics(t2)
+    if not m1 or not m2:
+        return jsonify({'error': 'Veri alınamadı'}), 500
     return jsonify({
-        "status": "success",
-        "new_balance": wallet.balance,
-        "message": "Analiz başlatılıyor... (1 Token kullanıldı)"
+        t1: {'price': m1['last_price'], 'predicted': m1['predicted_price'],
+             'gain': m1['potential_gain_pct'], 'rsi': m1['rsi']},
+        t2: {'price': m2['last_price'], 'predicted': m2['predicted_price'],
+             'gain': m2['potential_gain_pct'], 'rsi': m2['rsi']}
     })
 
-# ========================================================
-# 4. KAYIT VE GİRİŞ İŞLEMLERİ
-# ========================================================
 
+@app.route('/api/predict_run', methods=['POST'])
+@login_required
+def api_predict_run():
+    data     = request.json
+    ticker   = data.get('ticker')
+    model    = data.get('model', 'LINEAR')
+    features = data.get('features', [])
+
+    wallet = get_wallet()
+    if wallet.balance <= 0:
+        return jsonify({'error': 'Yetersiz Bakiye'}), 402
+
+    preds, chart_data = train_and_predict_dynamic(ticker, model, features)
+
+    if preds is None or len(preds) == 0:
+        return jsonify({'error': 'Tahmin başarısız — model hatası'}), 500
+
+    wallet.balance -= 1
+    new_pred = Prediction(
+        user_id=current_user.id,
+        symbol=ticker,
+        model_type=model,
+        predicted_result=f"${round(float(preds[-1]), 2)}"
+    )
+    db.session.add(new_pred)
+    db.session.commit()
+
+    return jsonify({
+        'status':     'success',
+        'balance':    wallet.balance,
+        'prediction': round(float(preds[-1]), 2),
+        'chart_data': chart_data
+    })
+
+
+# ========================================================
+# AUTH
+# ========================================================
 @app.route('/register', methods=['GET', 'POST'])
 def register():
-    # Zaten giriş yapmışsa Dashboard'a yolla
     if current_user.is_authenticated:
-        return redirect(url_for('dashboard'))
-
+        return redirect(url_for('root'))
     if request.method == 'POST':
-        email = request.form.get('email')
-        name = request.form.get('name')
+        email    = request.form.get('email')
+        name     = request.form.get('name')
         password = request.form.get('password')
-        
-        # 1. Kontrol: Bu mail zaten var mı?
-        user = User.query.filter_by(email=email).first()
-        if user:
-            flash('Bu e-posta adresi zaten kayıtlı. Lütfen giriş yapın.', 'error')
+        if User.query.filter_by(email=email).first():
+            flash('Bu e-posta zaten kayıtlı.', 'error')
             return redirect(url_for('register'))
-        
-        # 2. Kayıt: Yeni kullanıcı oluştur
         new_user = User(email=email, name=name, password=generate_password_hash(password))
         db.session.add(new_user)
         db.session.commit()
-        
-        # 3. Ödül: Cüzdan oluştur ve 5 Token ver
         new_wallet = Wallet(user_id=new_user.id, balance=5)
         db.session.add(new_wallet)
         db.session.commit()
-        
-        # 4. Giriş: Otomatik giriş yap ve panele at
         login_user(new_user)
-        flash('Aramıza hoş geldin! 5 Hediye Token hesabına tanımlandı.', 'success')
-        return redirect(url_for('dashboard'))
-        
+        return redirect(url_for('root'))
     return render_template('register.html')
+
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if current_user.is_authenticated:
-        return redirect(url_for('dashboard'))
-
+        return redirect(url_for('root'))
     if request.method == 'POST':
-        email = request.form.get('email')
+        email    = request.form.get('email')
         password = request.form.get('password')
-        
-        user = User.query.filter_by(email=email).first()
-        
+        user     = User.query.filter_by(email=email).first()
         if user and check_password_hash(user.password, password):
             login_user(user)
-            return redirect(url_for('dashboard'))
-        else:
-            flash('Hatalı e-posta veya şifre girdiniz.', 'error')
-            
+            return redirect(url_for('root'))
+        flash('Hatalı e-posta veya şifre.', 'error')
     return render_template('login.html')
+
 
 @app.route('/logout')
 @login_required
 def logout():
     logout_user()
-    return redirect(url_for('index')) # Çıkınca Landing Page'e at
+    return redirect(url_for('login'))
 
-# ========================================================
-# 5. YARDIMCI ARAÇLAR (Veritabanı Kurulumu)
-# ========================================================
 
 @app.route('/db-kur')
 def db_kur():
-    """
-    Render üzerinde tabloları elle kurmak için 'Arka Kapı' linki.
-    /db-kur adresine gidince çalışır.
-    """
-    try:
-        with app.app_context():
-            db.create_all()
-        return "<h1 style='color:green'>BAŞARILI! Tablolar (User, Wallet) oluşturuldu.</h1>"
-    except Exception as e:
-        return f"<h1 style='color:red'>HATA: {str(e)}</h1>"
+    with app.app_context():
+        db.create_all()
+    return "Veritabanı Başarıyla Kuruldu."
 
-# Uygulama Başlangıcı
+
 if __name__ == '__main__':
-    # Lokal çalışırken de tabloları kontrol et
     with app.app_context():
         db.create_all()
     app.run(debug=True, port=5000)

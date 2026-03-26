@@ -1,160 +1,136 @@
 document.addEventListener('DOMContentLoaded', () => {
     const predictBtn = document.getElementById('predict-button');
     const resultCard = document.getElementById('result-card');
+    const predictionText = document.getElementById('future-prediction-text');
+    const modelNameText = document.getElementById('result-model-name');
+    const chartCanvas = document.getElementById('predictionChart');
     let chartInstance = null;
 
-    predictBtn.addEventListener('click', async () => {
-        const ticker = document.getElementById('ticker-input').value;
-        const model = document.getElementById('model-input').value;
-        
-        // 1. Seçili Checkbox'ları Topla
-        const checkboxes = document.querySelectorAll('#feature-checkboxes input:checked');
-        const features = Array.from(checkboxes).map(cb => cb.value).join(',');
-
-        if (!ticker) {
-            alert("Lütfen bir hisse senedi seçin.");
-            return;
-        }
-
-        // 2. Arayüzü Hazırla (Yükleniyor...)
-        predictBtn.disabled = true;
-        predictBtn.innerText = "Analiz Yapılıyor...";
-        resultCard.classList.add('hidden');
-
-        try {
-            // 3. API İsteği Gönder
-            const url = `/api/get_data/${ticker}?model=${model}&features=${features}`;
-            const response = await fetch(url);
-            const data = await response.json();
-
-            if (!response.ok) throw new Error(data.error || "Sunucu hatası");
-
-            // --- VERİ İŞLEME VE TARİH HESAPLAMA ---
-
-            // A. Tarihleri Hazırla
-            // Backend'den gelen son tarihi alıp üzerine 14 gün ekleyeceğiz
-            const lastDateStr = data.last_known_date;
-            const lastDateObj = new Date(lastDateStr);
-            const futureDates = [];
+    if (predictBtn) {
+        predictBtn.addEventListener('click', async () => {
+            // 1. Verileri Topla
+            const ticker = document.getElementById('ticker-input').value;
+            const model = document.getElementById('model-input').value;
             
-            for (let i = 1; i <= 14; i++) {
-                const d = new Date(lastDateObj);
-                d.setDate(d.getDate() + i); // Her döngüde 1 gün ekle
-                futureDates.push(d.toISOString().split('T')[0]); // YYYY-MM-DD formatı
-            }
-
-            // Grafik için tüm etiketler: Geçmiş Tarihler + Gelecek Tarihler
-            const allLabels = [...data.validation_data.dates, ...futureDates];
-
-            // B. Fiyat Verilerini Hazırla
-            const actualPrices = data.validation_data.actual_prices;     // Gerçek (Yeşil)
-            const validationPrices = data.validation_data.predicted_prices; // Test (Turuncu)
-            const futurePredictions = data.future_prediction_7day;       // Gelecek (Kırmızı Liste)
-
-            // C. Grafikte Çizgileri Birleştirme Mantığı
-            // Kırmızı çizginin havada asılı kalmaması için, yeşil çizginin son noktasından başlaması lazım.
-            
-            // 1. Yeşil Çizgi Verisi (Gelecek kısımlar boş/null olacak)
-            const datasetActual = [...actualPrices, ...new Array(14).fill(null)];
-
-            // 2. Turuncu Çizgi Verisi (Gelecek kısımlar boş/null olacak)
-            const datasetValidation = [...validationPrices, ...new Array(14).fill(null)];
-
-            // 3. Kırmızı Çizgi Verisi (Geçmiş kısımlar boş/null olacak)
-            // Başlangıç noktası olarak son gerçek fiyatı ekliyoruz, sonra tahminleri ekliyoruz.
-            const datasetFuture = new Array(actualPrices.length - 1).fill(null);
-            datasetFuture.push(actualPrices[actualPrices.length - 1]); // Bağlantı noktası
-            datasetFuture.push(...futurePredictions); // Tahminleri ekle
-
-            // --- SONUÇLARI GÖSTER ---
-
-            // Metin Güncelleme (14. Günün Tahmini)
-            const finalPrice = futurePredictions[futurePredictions.length - 1];
-            document.getElementById('future-prediction-text').innerText = `$${finalPrice.toFixed(2)}`;
-            document.getElementById('result-model-name').innerText = model;
-            
-            // Kartı Göster
-            resultCard.classList.remove('hidden');
-
-            // --- GRAFİĞİ ÇİZ ---
-            const ctx = document.getElementById('predictionChart').getContext('2d');
-            
-            if (chartInstance) {
-                chartInstance.destroy(); // Eski grafiği temizle
-            }
-
-            chartInstance = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: allLabels,
-                    datasets: [
-                        {
-                            label: 'Gerçek Geçmiş Fiyat',
-                            data: datasetActual,
-                            borderColor: '#10b981', // Yeşil
-                            backgroundColor: '#10b981',
-                            borderWidth: 2,
-                            pointRadius: 0,
-                            tension: 0.1
-                        },
-                        {
-                            label: 'Modelin Geçmiş Testi',
-                            data: datasetValidation,
-                            borderColor: 'rgba(245, 158, 11, 0.7)', // Turuncu
-                            borderWidth: 1,
-                            borderDash: [5, 5], // Kesikli çizgi
-                            pointRadius: 0,
-                            tension: 0.1
-                        },
-                        {
-                            label: 'Gelecek 14 Gün Tahmini',
-                            data: datasetFuture,
-                            borderColor: '#ef4444', // Kırmızı
-                            backgroundColor: 'rgba(239, 68, 68, 0.1)', // Altı hafif boyalı
-                            borderWidth: 3,
-                            pointRadius: 3, // Noktalar görünsün
-                            pointHoverRadius: 6,
-                            fill: true,
-                            tension: 0.4 // Hafif kavisli estetik çizgi
-                        }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    interaction: {
-                        mode: 'index',
-                        intersect: false,
-                    },
-                    plugins: {
-                        legend: {
-                            labels: { color: '#9ca3af' } // Gri yazı
-                        },
-                        tooltip: {
-                            mode: 'index',
-                            intersect: false
-                        }
-                    },
-                    scales: {
-                        x: {
-                            ticks: { color: '#9ca3af' },
-                            grid: { color: '#374151' } // Koyu gri ızgara
-                        },
-                        y: {
-                            ticks: { color: '#9ca3af' },
-                            grid: { color: '#374151' }
-                        }
-                    }
-                }
+            // Seçili özellikleri (checkbox) al
+            const features = [];
+            document.querySelectorAll('#feature-checkboxes input:checked').forEach(cb => {
+                features.push(cb.value);
             });
 
-        } catch (err) {
-            console.error(err);
-            alert("Hata oluştu: " + err.message);
-        } finally {
-            // İşlem bitince butonu aç
-            predictBtn.disabled = false;
-            predictBtn.innerText = "ANALİZ BAŞLAT";
+            // 2. Butonu "Yükleniyor" yap
+            const originalText = predictBtn.innerText;
+            predictBtn.innerText = "Analiz Yapılıyor...";
+            predictBtn.disabled = true;
+            predictBtn.classList.add('opacity-50', 'cursor-not-allowed');
+
+            try {
+                // 3. API'ye İstek At (Doğru Adres: /api/predict_run)
+                const response = await fetch('/api/predict_run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ticker, model, features })
+                });
+
+                // HTML dönerse hata ver (Senin aldığın hatayı yakalar)
+                const contentType = response.headers.get("content-type");
+                if (contentType && contentType.indexOf("application/json") === -1) {
+                    throw new Error("Sunucu JSON yerine HTML döndürdü. Backend hatası olabilir.");
+                }
+
+                const data = await response.json();
+
+                if (data.error) {
+                    alert("Hata: " + data.error);
+                } else {
+                    // 4. Sonuçları Göster
+                    resultCard.classList.remove('hidden');
+                    predictionText.innerText = `$${data.prediction}`;
+                    modelNameText.innerText = model;
+                    
+                    // Grafiği Çiz
+                    drawChart(data.chart_data);
+                    
+                    // Bakiyeyi güncelle (Navbar'daki)
+                    // Sayfayı yenilemeden bakiyeyi düşürmek istersen buraya kod eklenebilir
+                    // Şimdilik basit tutalım.
+                }
+
+            } catch (err) {
+                console.error(err);
+                alert("Bir hata oluştu: " + err.message);
+            } finally {
+                // Butonu eski haline getir
+                predictBtn.innerText = originalText;
+                predictBtn.disabled = false;
+                predictBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+        });
+    }
+
+    function drawChart(chartData) {
+        if (chartInstance) {
+            chartInstance.destroy();
         }
-    });
+        
+        const ctx = chartCanvas.getContext('2d');
+        
+        // Verileri hazırla
+        const labels = chartData.dates;
+        const actualPrices = chartData.actual_prices;
+        const predictedPrices = chartData.predicted_prices;
+        
+        // Grafik verilerini birleştir (Geçmiş + Gelecek gibi düşünebiliriz ama 
+        // burada basitçe test verisi ve model tahmini kıyaslaması yapıyoruz)
+        
+        chartInstance = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'Gerçek Fiyat',
+                        data: actualPrices,
+                        borderColor: '#10b981', // Yeşil
+                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.3,
+                        pointRadius: 0
+                    },
+                    {
+                        label: 'Model Tahmini',
+                        data: predictedPrices,
+                        borderColor: '#f59e0b', // Turuncu
+                        borderDash: [5, 5],
+                        borderWidth: 2,
+                        tension: 0.3,
+                        pointRadius: 0
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                plugins: {
+                    legend: {
+                        labels: { color: '#9ca3af' }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { display: false },
+                        ticks: { color: '#6b7280', maxTicksLimit: 8 }
+                    },
+                    y: {
+                        grid: { color: '#374151' },
+                        ticks: { color: '#6b7280' }
+                    }
+                }
+            }
+        });
+    }
 });

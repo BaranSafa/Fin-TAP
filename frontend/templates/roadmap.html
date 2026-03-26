@@ -1,62 +1,285 @@
 {% extends "base.html" %}
-
-{% block title %}Fin-TAP - Project RoadMap{% endblock %}
-{% block header_title %}RoadMap{% endblock %}
+{% block title %}Roadmap — Fin-TAP{% endblock %}
+{% block header_title %}Project Roadmap{% endblock %}
+{% block header_sub %}FIN-TAP DEVELOPMENT TIMELINE · CURRENT STATUS & FUTURE PLANS{% endblock %}
 
 {% block content %}
-<div class="space-y-8">
-    
-    <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
-        <h2 class="text-2xl font-semibold mb-5 border-b border-gray-700 pb-3">Current Project Features (v1.0)</h2>
-        
-        <ul class="list-disc list-inside space-y-3 text-gray-300 text-lg">
-            <li>
-                <span class="font-semibold text-cyan-400">Dynamic Backend API:</span> A powerful API developed using Python Flask that handles all data processing and prediction requests.
-            </li>
-            <li>
-                <span class="font-semibold text-cyan-400">Advanced Machine Learning:</span> Gradient Boosting models using `XGBoost` / `LightGBM` to predict prices.
-            </li>
-            <li>
-                <span class="font-semibold text-cyan-400">Comprehensive Feature Engineering:</span> 25+ technical indicators (MACD, RSI, Bollinger Bands, Ichimoku Cloud etc.) calculated with `pandas-ta` library.
-            </li>
-            <li>
-                <span class="font-semibold text-cyan-400">Multi-Page Modern Interface:</span> Tailwind is a CSS-styled dashboard with dark mode, `Home`, `Predict`, `All Stocks` and `Suggestion` pages.
-            </li>
-            <li>
-                <span class="font-semibold text-cyan-400">Automatic Model Training:</span> Automatic training and saving of models for all stocks with the `train.py` script.
-            </li>
-             <li>
-                <span class="font-semibold text-cyan-400">Smart Routing:</span> Automatic `ticker` redirection from "All Stocks" page to "Predict" page and automatic start of the forecast.
-            </li>
-            <li>
-                <span class="font-semibold text-cyan-400">Smart Suggestion System:</span> Analysis module showing the top 3 stocks with the highest upside potential on the "Suggestion" page.
-            </li>
-            <li>
-                <span class="font-semibold text-cyan-400">Desktop Application:</span> Compiling the entire project into a single `.exe` file using `PyWebView` and `PyInstaller`.
-            </li>
-        </ul>
+<style>
+    .road-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        align-items: start;
+    }
+
+    .phase-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        overflow: hidden;
+    }
+    .phase-header {
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--border);
+        display: flex; align-items: center; justify-content: space-between;
+    }
+    .phase-title { font-weight: 800; font-size: 0.95rem; }
+    .phase-body { padding: 16px 20px; }
+
+    .feat-item {
+        display: flex; align-items: flex-start; gap: 12px;
+        padding: 10px 0;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.83rem;
+    }
+    .feat-item:last-child { border-bottom: none; }
+    .feat-icon { font-size: 1rem; flex-shrink: 0; margin-top: 1px; }
+    .feat-name { font-weight: 700; margin-bottom: 3px; }
+    .feat-desc { color: var(--text2); font-size: 0.77rem; line-height: 1.4; }
+
+    .timeline-col { grid-column: span 2; }
+
+    .timeline {
+        position: relative;
+        padding-left: 32px;
+    }
+    .timeline::before {
+        content: '';
+        position: absolute; left: 10px; top: 8px; bottom: 8px;
+        width: 1px;
+        background: linear-gradient(to bottom, var(--accent), var(--border), var(--border));
+    }
+
+    .tl-item {
+        position: relative;
+        margin-bottom: 20px;
+    }
+    .tl-item:last-child { margin-bottom: 0; }
+
+    .tl-dot {
+        position: absolute; left: -26px; top: 4px;
+        width: 12px; height: 12px;
+        border-radius: 50%;
+        border: 2px solid var(--border2);
+        background: var(--surface);
+    }
+    .tl-dot.done  { background: var(--green);  border-color: var(--green); box-shadow: 0 0 8px rgba(0,230,118,0.4); }
+    .tl-dot.inprogress { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 8px rgba(0,212,255,0.4); animation: glow-pulse 2s ease infinite; }
+    .tl-dot.planned { background: var(--surface2); border-color: var(--border2); }
+
+    @keyframes glow-pulse {
+        0%,100% { box-shadow: 0 0 4px rgba(0,212,255,0.4); }
+        50% { box-shadow: 0 0 12px rgba(0,212,255,0.7); }
+    }
+
+    .tl-date { font-family: var(--mono); font-size: 0.62rem; color: var(--text3); margin-bottom: 4px; letter-spacing: 1px; }
+    .tl-title { font-weight: 700; font-size: 0.88rem; margin-bottom: 4px; }
+    .tl-desc  { font-size: 0.78rem; color: var(--text2); line-height: 1.5; }
+
+    .tech-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin-top: 12px;
+    }
+    .tech-item {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        padding: 12px;
+        text-align: center;
+    }
+    .tech-name { font-family: var(--mono); font-size: 0.72rem; font-weight: 700; color: var(--accent); margin-bottom: 3px; }
+    .tech-role { font-size: 0.68rem; color: var(--text2); }
+</style>
+
+<div class="road-grid fade-up">
+
+    <!-- CURRENT FEATURES -->
+    <div class="phase-card">
+        <div class="phase-header">
+            <div>
+                <div class="sec-label" style="margin-bottom:3px;">PHASE 1 · COMPLETE</div>
+                <div class="phase-title">v1.0 — Current Features</div>
+            </div>
+            <span class="badge badge-green">SHIPPED</span>
+        </div>
+        <div class="phase-body">
+            <div class="feat-item">
+                <span class="feat-icon">✅</span>
+                <div>
+                    <div class="feat-name">Dynamic Flask API</div>
+                    <div class="feat-desc">RESTful backend with prediction endpoints, authentication, and wallet validation middleware.</div>
+                </div>
+            </div>
+            <div class="feat-item">
+                <span class="feat-icon">✅</span>
+                <div>
+                    <div class="feat-name">5 ML Models</div>
+                    <div class="feat-desc">Linear Regression, Random Forest, XGBoost, LightGBM, and LSTM — all selectable at runtime.</div>
+                </div>
+            </div>
+            <div class="feat-item">
+                <span class="feat-icon">✅</span>
+                <div>
+                    <div class="feat-name">25+ Technical Indicators</div>
+                    <div class="feat-desc">RSI, MACD, Bollinger Bands, ATR, Stochastic, OBV, ADX — dynamically selectable as features.</div>
+                </div>
+            </div>
+            <div class="feat-item">
+                <span class="feat-icon">✅</span>
+                <div>
+                    <div class="feat-name">Token Economy</div>
+                    <div class="feat-desc">Pay-per-prediction SaaS model with persistent digital wallets and transaction logging.</div>
+                </div>
+            </div>
+            <div class="feat-item">
+                <span class="feat-icon">✅</span>
+                <div>
+                    <div class="feat-name">Asset Comparison</div>
+                    <div class="feat-desc">Side-by-side AI predictions for two stocks with return potential ranking.</div>
+                </div>
+            </div>
+            <div class="feat-item">
+                <span class="feat-icon">✅</span>
+                <div>
+                    <div class="feat-name">User Auth System</div>
+                    <div class="feat-desc">Registration, login, session management, and per-user prediction/transaction history.</div>
+                </div>
+            </div>
+        </div>
     </div>
 
-    <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
-        <h2 class="text-2xl font-semibold mb-5 border-b border-gray-700 pb-3">Future Plans (v2.0)</h2>
-        
-        <ul class="list-disc list-inside space-y-3 text-gray-400 text-lg">
-            <li>
-                <span class="font-semibold text-gray-200">"Prices" Page:</span> By activating the "Prices" page, you can show real-time price data using `yfinance` or a different API.
-            </li>
-            <li>
-                <span class="font-semibold text-gray-200">Advanced "All Stocks" Page:</span> Adding additional information such as company names and market capitalization to the table on the "All Stocks" page.
-            </li>
-            <li>
-                <span class="font-semibold text-gray-200">User Account:</span> A “Portfolio” system where users can save their favorite stocks.
-            </li>
-            <li>
-                <span class="font-semibold text-gray-200">More Models:</span> Integrating different time series models such as LSTM and (S)ARIMA and providing model selection feature on the "Predict" page.
-            </li>
-            <li>
-                <span class="font-semibold text-gray-200">Automatic Retraining:</span> Setting up a CI/CD pipeline that automatically retrains models on a server on a weekly basis.
-            </li>
-        </ul>
+    <!-- FUTURE FEATURES -->
+    <div class="phase-card">
+        <div class="phase-header">
+            <div>
+                <div class="sec-label" style="margin-bottom:3px;">PHASE 2 · PLANNED</div>
+                <div class="phase-title">v2.0 — Roadmap</div>
+            </div>
+            <span class="badge badge-amber">IN PROGRESS</span>
+        </div>
+        <div class="phase-body">
+            <div class="feat-item">
+                <span class="feat-icon">🔄</span>
+                <div>
+                    <div class="feat-name">Cryptocurrency Support</div>
+                    <div class="feat-desc">Extend data pipeline to support BTC, ETH, SOL and other majors via CCXT/Binance API.</div>
+                </div>
+            </div>
+            <div class="feat-item">
+                <span class="feat-icon">🔄</span>
+                <div>
+                    <div class="feat-name">Payment Integration</div>
+                    <div class="feat-desc">Stripe payment gateway for purchasing token packs — $2.99 starter to $39.99 whale packs.</div>
+                </div>
+            </div>
+            <div class="feat-item">
+                <span class="feat-icon">📋</span>
+                <div>
+                    <div class="feat-name">Favorites Portfolio</div>
+                    <div class="feat-desc">Users can save favorite stocks and get a personalized portfolio overview on their dashboard.</div>
+                </div>
+            </div>
+            <div class="feat-item">
+                <span class="feat-icon">📋</span>
+                <div>
+                    <div class="feat-name">Live Price Streaming</div>
+                    <div class="feat-desc">WebSocket-based real-time price updates on the dashboard without page refresh.</div>
+                </div>
+            </div>
+            <div class="feat-item">
+                <span class="feat-icon">📋</span>
+                <div>
+                    <div class="feat-name">Automatic Retraining</div>
+                    <div class="feat-desc">Scheduled CI/CD pipeline to retrain all models weekly with fresh OHLCV data.</div>
+                </div>
+            </div>
+            <div class="feat-item">
+                <span class="feat-icon">📋</span>
+                <div>
+                    <div class="feat-name">Cloud Deployment (.com)</div>
+                    <div class="feat-desc">Production deployment on Render/AWS with SSL, CDN, and scalable compute nodes.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TIMELINE -->
+    <div class="timeline-col">
+        <div class="phase-card">
+            <div class="phase-header">
+                <div>
+                    <div class="sec-label" style="margin-bottom:3px;">DEVELOPMENT TIMELINE</div>
+                    <div class="phase-title">Project Milestones</div>
+                </div>
+            </div>
+            <div class="phase-body">
+                <div class="timeline">
+                    <div class="tl-item">
+                        <div class="tl-dot done"></div>
+                        <div class="tl-date">28 FEB 2026</div>
+                        <div class="tl-title">Backend Infrastructure</div>
+                        <div class="tl-desc">User authentication, database setup (Users / Wallets tables), and initial Flask API routing.</div>
+                    </div>
+                    <div class="tl-item">
+                        <div class="tl-dot done"></div>
+                        <div class="tl-date">15 MAR 2026</div>
+                        <div class="tl-title">ML Engine & Feature Engineering</div>
+                        <div class="tl-desc">Dynamic trainer supporting 5 models and 25+ technical indicators; real-time data pipeline via yfinance.</div>
+                    </div>
+                    <div class="tl-item">
+                        <div class="tl-dot inprogress"></div>
+                        <div class="tl-date">31 MAR 2026</div>
+                        <div class="tl-title">Token Economy & Frontend Polish</div>
+                        <div class="tl-desc">Pay-per-prediction logic, marketplace backend, and dashboard / prediction UI redesign.</div>
+                    </div>
+                    <div class="tl-item">
+                        <div class="tl-dot planned"></div>
+                        <div class="tl-date">15 APR 2026</div>
+                        <div class="tl-title">Crypto Integration & Payments</div>
+                        <div class="tl-desc">CCXT/Binance data pipeline for crypto assets; Stripe payment gateway for token purchases.</div>
+                    </div>
+                    <div class="tl-item">
+                        <div class="tl-dot planned"></div>
+                        <div class="tl-date">30 APR 2026</div>
+                        <div class="tl-title">Testing & QA</div>
+                        <div class="tl-desc">Unit tests, integration tests, load testing (100 concurrent predictions), security audit.</div>
+                    </div>
+                    <div class="tl-item">
+                        <div class="tl-dot planned"></div>
+                        <div class="tl-date">15 MAY 2026</div>
+                        <div class="tl-title">Production Deployment</div>
+                        <div class="tl-desc">Cloud deployment to .com domain with SSL, CDN, monitoring, and scheduled model retraining.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TECH STACK -->
+    <div>
+        <div class="phase-card">
+            <div class="phase-header">
+                <div class="phase-title">Technology Stack</div>
+            </div>
+            <div class="phase-body">
+                <div class="tech-grid">
+                    <div class="tech-item"><div class="tech-name">Python 3.10</div><div class="tech-role">Backend</div></div>
+                    <div class="tech-item"><div class="tech-name">Flask</div><div class="tech-role">Web Framework</div></div>
+                    <div class="tech-item"><div class="tech-name">SQLAlchemy</div><div class="tech-role">ORM / DB</div></div>
+                    <div class="tech-item"><div class="tech-name">yfinance</div><div class="tech-role">Market Data</div></div>
+                    <div class="tech-item"><div class="tech-name">TensorFlow</div><div class="tech-role">LSTM Model</div></div>
+                    <div class="tech-item"><div class="tech-name">XGBoost</div><div class="tech-role">Gradient Boost</div></div>
+                    <div class="tech-item"><div class="tech-name">LightGBM</div><div class="tech-role">Gradient Boost</div></div>
+                    <div class="tech-item"><div class="tech-name">scikit-learn</div><div class="tech-role">ML Utilities</div></div>
+                    <div class="tech-item"><div class="tech-name">pandas</div><div class="tech-role">Data Pipeline</div></div>
+                    <div class="tech-item"><div class="tech-name">numpy</div><div class="tech-role">Numerics</div></div>
+                    <div class="tech-item"><div class="tech-name">Chart.js</div><div class="tech-role">Visualization</div></div>
+                    <div class="tech-item"><div class="tech-name">Tailwind CSS</div><div class="tech-role">Styling</div></div>
+                </div>
+            </div>
+        </div>
     </div>
 
 </div>

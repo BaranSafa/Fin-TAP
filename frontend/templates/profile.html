@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+{% block title %}Profile — Fin-TAP{% endblock %}
+{% block header_title %}My Profile{% endblock %}
+{% block header_sub %}ACCOUNT OVERVIEW · PREDICTION HISTORY · TRANSACTION LOG{% endblock %}
+
+{% block content %}
+<style>
+    .profile-grid {
+        display: grid;
+        grid-template-columns: 280px 1fr;
+        gap: 16px;
+        align-items: start;
+    }
+
+    .avatar-lg {
+        width: 64px; height: 64px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, var(--accent), var(--purple));
+        display: flex; align-items: center; justify-content: center;
+        font-size: 1.6rem; font-weight: 800;
+        color: #000;
+        margin: 0 auto 12px;
+    }
+
+    .info-row {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 10px 0;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.82rem;
+    }
+    .info-row:last-child { border-bottom: none; }
+    .ir-key { color: var(--text2); }
+    .ir-val { font-family: var(--mono); font-size: 0.78rem; font-weight: 700; }
+
+    .balance-display {
+        text-align: center;
+        padding: 20px;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        margin-bottom: 12px;
+    }
+    .bd-label { font-family: var(--mono); font-size: 0.58rem; color: var(--text3); letter-spacing: 2px; margin-bottom: 6px; }
+    .bd-value { font-family: var(--mono); font-size: 2rem; font-weight: 700; color: var(--amber); }
+    .bd-unit  { font-size: 0.8rem; color: var(--text2); margin-left: 4px; }
+
+    .tabs {
+        display: flex; gap: 0;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 0;
+    }
+    .tab-btn {
+        padding: 10px 20px;
+        font-size: 0.82rem; font-weight: 700;
+        color: var(--text2);
+        background: none; border: none;
+        border-bottom: 2px solid transparent;
+        cursor: pointer; transition: all 0.15s;
+        font-family: var(--sans);
+        margin-bottom: -1px;
+    }
+    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .tab-btn:hover:not(.active) { color: var(--text); }
+
+    .tab-content { display: none; padding: 0; }
+    .tab-content.active { display: block; }
+
+    .empty-row {
+        text-align: center;
+        padding: 40px;
+        color: var(--text2);
+        font-size: 0.82rem;
+    }
+
+    .model-dot {
+        display: inline-block;
+        width: 6px; height: 6px;
+        border-radius: 50%;
+        background: var(--accent);
+        margin-right: 6px;
+    }
+</style>
+
+<div class="profile-grid fade-up">
+
+    <!-- LEFT: User Card -->
+    <div style="display:flex; flex-direction:column; gap:12px;">
+
+        <div class="card card-pad" style="text-align:center;">
+            <div class="avatar-lg">{{ user.name[0]|upper if user.name else 'U' }}</div>
+            <div style="font-weight:800; font-size:1rem; margin-bottom:4px;">{{ user.name }}</div>
+            <div style="font-family:var(--mono); font-size:0.7rem; color:var(--text2);">{{ user.email }}</div>
+            <div style="margin-top:8px;">
+                <span class="badge badge-accent">ACTIVE</span>
+            </div>
+        </div>
+
+        <!-- Balance -->
+        <div class="card card-pad">
+            <div class="sec-label">// WALLET</div>
+            <div class="balance-display">
+                <div class="bd-label">CURRENT BALANCE</div>
+                <div class="bd-value">{{ wallet.balance }}<span class="bd-unit">TOKENS</span></div>
+            </div>
+            <a href="/prices" class="btn btn-ghost" style="width:100%; justify-content:center; display:flex;">
+                💳 Buy More Tokens
+            </a>
+        </div>
+
+        <!-- Account Info -->
+        <div class="card card-pad">
+            <div class="sec-label">// ACCOUNT INFO</div>
+            <div class="info-row">
+                <span class="ir-key">Member Since</span>
+                <span class="ir-val">{{ user.created_at.strftime('%b %Y') if user.created_at else '—' }}</span>
+            </div>
+            <div class="info-row">
+                <span class="ir-key">Total Predictions</span>
+                <span class="ir-val c-accent">{{ predictions|length }}</span>
+            </div>
+            <div class="info-row">
+                <span class="ir-key">Total Purchases</span>
+                <span class="ir-val c-green">{{ transactions|length }}</span>
+            </div>
+            <div class="info-row">
+                <span class="ir-key">Plan</span>
+                <span class="ir-val">FREE</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- RIGHT: History Tabs -->
+    <div class="card" style="overflow:hidden;">
+        <div class="tabs" style="padding: 0 20px;">
+            <button class="tab-btn active" onclick="switchTab(this,'tab-predictions')">
+                🤖 Prediction History ({{ predictions|length }})
+            </button>
+            <button class="tab-btn" onclick="switchTab(this,'tab-transactions')">
+                💳 Token Transactions ({{ transactions|length }})
+            </button>
+        </div>
+
+        <!-- Predictions Tab -->
+        <div id="tab-predictions" class="tab-content active">
+            {% if predictions %}
+            <table class="ft-table">
+                <thead>
+                    <tr>
+                        <th>DATE</th>
+                        <th>SYMBOL</th>
+                        <th>MODEL</th>
+                        <th>RESULT</th>
+                        <th>ACTION</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in predictions %}
+                    <tr>
+                        <td class="mono c-dim" style="font-size:0.75rem;">{{ p.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                        <td><span class="badge badge-accent">{{ p.symbol }}</span></td>
+                        <td>
+                            <span style="font-size:0.78rem; color:var(--text2);">
+                                <span class="model-dot"></span>{{ p.model_type }}
+                            </span>
+                        </td>
+                        <td class="mono" style="color:var(--green); font-size:0.82rem;">{{ p.predicted_result }}</td>
+                        <td>
+                            <a href="/predict?ticker={{ p.symbol }}" style="font-family:var(--mono); font-size:0.65rem; color:var(--accent); text-decoration:none; letter-spacing:1px;">
+                                RE-RUN →
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-row">
+                <div style="font-size:1.5rem; margin-bottom:8px;">🤖</div>
+                <div>No predictions yet. <a href="/predict" style="color:var(--accent);">Run your first forecast →</a></div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Transactions Tab -->
+        <div id="tab-transactions" class="tab-content">
+            {% if transactions %}
+            <table class="ft-table">
+                <thead>
+                    <tr>
+                        <th>DATE</th>
+                        <th>TYPE</th>
+                        <th>TOKENS</th>
+                        <th>AMOUNT PAID</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for tx in transactions %}
+                    <tr>
+                        <td class="mono c-dim" style="font-size:0.75rem;">{{ tx.date.strftime('%Y-%m-%d') }}</td>
+                        <td>
+                            {% if tx.tokens_added > 0 %}
+                            <span class="badge badge-green">PURCHASE</span>
+                            {% else %}
+                            <span class="badge badge-red">USAGE</span>
+                            {% endif %}
+                        </td>
+                        <td class="mono" style="color:{% if tx.tokens_added > 0 %}var(--green){% else %}var(--red){% endif %}; font-weight:700;">
+                            {{ '+' if tx.tokens_added > 0 else '' }}{{ tx.tokens_added }}
+                        </td>
+                        <td class="mono" style="color:var(--text2); font-size:0.8rem;">
+                            {% if tx.amount_paid %}${{ '%.2f'|format(tx.amount_paid) }}{% else %}—{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-row">
+                <div style="font-size:1.5rem; margin-bottom:8px;">💳</div>
+                <div>No transactions yet. <a href="/prices" style="color:var(--accent);">Buy tokens →</a></div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function switchTab(btn, tabId) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(tabId).classList.add('active');
+}
+</script>
+{% endblock %}
