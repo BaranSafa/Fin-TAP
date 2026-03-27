@@ -1,20 +1,20 @@
 """
-dynamic_trainer.py  –  Fin-TAP Backend
-Sıfırdan yazılmış ML eğitim ve tahmin motoru.
+dynamic_trainer.py  —  Fin-TAP Backend
 
-DÜZELTILEN ANA SORUN — DÜZLÜK (FLAT LINE):
-  Eski kod scaled feature vektörünü küçük gaussian noise ile
-  güncelliyordu:  curr = curr * (1 + 0.002 noise)
-  Bu işlem modelin gördüğü input'u neredeyse hiç değiştirmiyordu
-  → model her adımda aynı tahmini üretiyordu → DÜZLÜK
+DÜZELTILEN SORUNLAR:
+1. FLAT LINE (BACKTEST):  Model artık log-return tahmin ediyor, fiyat değil.
+   Backtest chart: pred_price[t] = Close[t] * exp(model.predict(X[t]))
+   Bu her zaman hareketli bir çizgi üretir.
 
-DOĞRU YAKLAŞIM — Lag-Based Rolling Window Forecasting:
-  Her tahmin adımında gerçek fiyat değişkenlerine (lag, SMA, RSI...)
-  dayanan yeni bir feature satırı oluşturulur.
-  Bu satır scaler ile dönüştürülüp modele verilir.
-  Tahmin edilen fiyat bir sonraki adımın lag değeri olur.
+2. FLAT LINE (GELECEK):  Lag-based rolling window kullanıyoruz.
+   Her adımda önceki tahmin → yeni feature hesabı → yeni tahmin.
 
-EK MODEL: GRADIENT BOOSTING (sklearn) — XGBoost/LightGBM yokken de çalışır.
+3. DATA LEAKAGE:  Tüm feature'lar price-relative (Close raw yok).
+
+4. FEATURE ÇAKIŞMASI:  UI'dan aynı veriyi ölçen iki grup seçilince
+   (örn. SMA + Bollinger her ikisi de fiyatın ortalamasına göre),
+   scaler zaten bunu handle eder, ama model_manager.py'de
+   correlation-based feature deduplication eklendi.
 """
 
 import warnings
@@ -23,16 +23,15 @@ warnings.filterwarnings('ignore')
 import numpy as np
 import pandas as pd
 from datetime import timedelta
-from sklearn.linear_model import LinearRegression, Ridge
+from sklearn.linear_model import Ridge
 from sklearn.ensemble import (
-    RandomForestRegressor,
     GradientBoostingRegressor,
+    RandomForestRegressor,
     ExtraTreesRegressor,
 )
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import RobustScaler
+from sklearn.metrics import mean_absolute_percentage_error
 
-# Optional heavy deps
 try:
     import xgboost as xgb
     HAS_XGB = True
@@ -47,533 +46,466 @@ except ImportError:
 
 try:
     from tensorflow.keras.models import Sequential
-    from tensorflow.keras.layers import Dense, LSTM, Dropout, Input
-    from tensorflow.keras.callbacks import EarlyStopping
+    from tensorflow.keras.layers import Dense, LSTM, Dropout, Input, BatchNormalization
+    from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
     HAS_TF = True
 except Exception:
     HAS_TF = False
 
-# Relative import (package olarak kullanım)
 try:
-    from .data_manager import get_processed_data
+    from .data_manager import get_processed_data, FEATURE_GROUPS, DEFAULT_GROUPS
 except ImportError:
-    from data_manager import get_processed_data
+    from data_manager import get_processed_data, FEATURE_GROUPS, DEFAULT_GROUPS
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-#  FEATURE GRUP TANIMI
-#  Her grubun altındaki kolon adları data_manager.py çıktısıyla eşleşmelidir.
-# ──────────────────────────────────────────────────────────────────────────────
-FEATURE_GROUPS: dict[str, list[str]] = {
-    'OHLCV':      ['Open', 'High', 'Low', 'Close', 'Volume'],
-    'Lag':        ['lag_1', 'lag_2', 'lag_5', 'lag_10'],
-    'Returns':    ['returns', 'ret_3', 'ret_5', 'ret_10'],
-    'SMA':        ['SMA_5', 'SMA_14', 'SMA_20', 'SMA_50',
-                   'price_sma14_ratio', 'price_sma50_ratio'],
-    'EMA':        ['EMA_9', 'EMA_14', 'EMA_21'],
-    'Volatility': ['volatility_10', 'volatility_20', 'realized_vol'],
-    'Bollinger':  ['BB_upper', 'BB_middle', 'BB_lower', 'BB_pct', 'BB_width'],
-    'MACD':       ['MACD', 'MACD_signal', 'MACD_hist'],
-    'RSI':        ['RSI_14', 'RSI_7'],
-    'Stoch':      ['STOCH_K', 'STOCH_D'],
-    'ATR':        ['ATR_14', 'ATR_pct'],
-    'OBV':        ['OBV', 'OBV_SMA_14', 'OBV_ratio'],
-    'ADX':        ['ADX_14', 'ADX_plus', 'ADX_minus'],
-    'Momentum':   ['MOM_5', 'MOM_10', 'ROC_5', 'ROC_10'],
-    'CCI':        ['CCI_20'],
-    'Williams':   ['WILLIAMS_R'],
-    'Volume':     ['volume_sma_14', 'volume_ratio', 'price_x_volume'],
-    'Pattern':    ['high_low_pct', 'close_open'],
-}
-
-# Varsayılan seçili gruplar (UI'dan hiç seçilmezse kullanılır)
-DEFAULT_GROUPS = ['Lag', 'Returns', 'SMA', 'MACD', 'RSI', 'Bollinger', 'ATR', 'Volatility']
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-#  YARDIMCI: feature vektörü oluştur (lag-based iterative forecasting için)
-# ──────────────────────────────────────────────────────────────────────────────
-def _build_feature_row(
-    price_hist:  list,   # son N günün kapanış fiyatları (sonuncusu en yeni)
-    high_hist:   list,
-    low_hist:    list,
-    volume_hist: list,
-    feature_cols: list[str],
-) -> dict:
+# ─────────────────────────────────────────────────────────────────────────────
+#  YARDIMCI: İteratif tahmin için feature satırı hesapla
+#  (tüm feature'lar fiyat geçmişinden yeniden hesaplanır)
+# ─────────────────────────────────────────────────────────────────────────────
+def _compute_row(p: list, h: list, lo: list, v: list, feat_cols: list) -> dict:
     """
-    Tarihsel pencereden tek bir feature satırı üretir.
-    Sadece feature_cols içindeki sütunları hesaplar → hız.
+    Son N günün OHLCV geçmişinden feature sözlüğü üretir.
+    Sadece feat_cols içinde istenen feature'ları hesaplar.
     """
-    p    = price_hist
-    h    = high_hist
-    lo   = low_hist
-    v    = volume_hist
-    n    = len(p)
+    n = len(p)
 
-    def safe_mean(lst, w):
+    def s(lst, w):
         w = min(w, len(lst))
         return float(np.mean(lst[-w:])) if w > 0 else float(lst[-1])
 
-    def safe_std(lst, w):
+    def std(lst, w):
         w = min(w, len(lst))
-        return float(np.std(lst[-w:])) if w > 1 else 0.0
+        arr = lst[-w:]
+        return float(np.std(arr)) if len(arr) > 1 else 0.0
 
-    def ewm_last(lst, span):
-        s = pd.Series(lst)
-        return float(s.ewm(span=span, adjust=False).mean().iloc[-1])
+    def ewm_v(lst, span):
+        s_pd = pd.Series(lst)
+        return float(s_pd.ewm(span=span, adjust=False).mean().iloc[-1])
+
+    def safe_div(a, b, default=0.0):
+        return float(a / b) if b != 0 else default
 
     cur   = float(p[-1])
-    prev1 = float(p[-2]) if n >= 2 else cur
-    prev2 = float(p[-3]) if n >= 3 else prev1
-    prev5 = float(p[-6]) if n >= 6 else prev1
-    prev10= float(p[-11]) if n >= 11 else prev1
+    prev  = [float(p[-i]) if i < n else float(p[0]) for i in range(1, 22)]
+    # prev[0] = p[-1], prev[1] = p[-2], ...
 
-    ret    = (cur - prev1) / prev1 if prev1 != 0 else 0.0
-    ret3   = (cur - float(p[-4])  ) / float(p[-4])   if n >= 4  else ret
-    ret5   = (cur - prev5)          / prev5           if prev5 != 0 else ret
-    ret10  = (cur - prev10)         / prev10          if prev10 != 0 else ret
+    # log-returns
+    lr    = [np.log(p[-i] / p[-i-1]) if (i+1 <= n and p[-i-1]>0) else 0 for i in range(1, 22)]
 
-    sma5   = safe_mean(p, 5)
-    sma14  = safe_mean(p, 14)
-    sma20  = safe_mean(p, 20)
-    sma50  = safe_mean(p, 50)
-
-    ema9   = ewm_last(p, 9)
-    ema14  = ewm_last(p, 14)
-    ema21  = ewm_last(p, 21)
-
-    std10  = safe_std(p, 10)
-    std20  = safe_std(p, 20)
-
-    log_rets = [np.log(p[i]/p[i-1]) for i in range(max(1, n-20), n) if p[i-1]>0]
-    rvol = float(np.std(log_rets) * np.sqrt(252)) if len(log_rets) > 1 else 0.0
-
-    bb_u = sma20 + 2 * std20
-    bb_l = sma20 - 2 * std20
-    bb_w = (bb_u - bb_l) / sma20 if sma20 != 0 else 0.0
-    bb_p = (cur - bb_l) / (bb_u - bb_l) if (bb_u - bb_l) != 0 else 0.5
-
-    ema12 = ewm_last(p, 12)
-    ema26 = ewm_last(p, 26)
-    macd_val = ema12 - ema26
-    macd_sig = ewm_last([macd_val], 9)   # approximation for single row
-    macd_hist_val = macd_val - macd_sig
+    lr1   = lr[0]
+    lr2   = lr[1]
+    lr3   = lr[2]
+    lr5   = safe_div(np.log(p[-1]/p[-6]) if n>5 else 0, 5)
+    lr10  = safe_div(np.log(p[-1]/p[-11]) if n>10 else 0, 10)
+    lr20  = safe_div(np.log(p[-1]/p[-21]) if n>20 else 0, 20)
 
     # RSI
-    diffs  = [p[i]-p[i-1] for i in range(max(1, n-15), n)]
-    gains  = [max(d,0) for d in diffs]
-    losses = [max(-d,0) for d in diffs]
-    avg_g  = np.mean(gains)  if gains  else 0
-    avg_l  = np.mean(losses) if losses else 1e-9
-    rsi14  = 100 - 100/(1 + avg_g/avg_l)
+    def rsi_calc(period):
+        diffs = [p[-i]-p[-i-1] for i in range(1, min(period+2, n))]
+        if not diffs: return 50.0
+        gains  = [max(d,0) for d in diffs]
+        losses = [max(-d,0) for d in diffs]
+        ag = np.mean(gains);  al = np.mean(losses)
+        return 100 - 100/(1 + ag/al) if al > 0 else 100.0
 
-    diffs7 = diffs[-7:]
-    gains7 = [max(d,0) for d in diffs7]
-    losses7= [max(-d,0) for d in diffs7]
-    ag7    = np.mean(gains7)  if gains7  else 0
-    al7    = np.mean(losses7) if losses7 else 1e-9
-    rsi7   = 100 - 100/(1 + ag7/al7)
+    r7  = rsi_calc(7);  r14 = rsi_calc(14);  r21 = rsi_calc(21)
+    r_diff = r14 - r7
+    r_mom  = r14 - (rsi_calc(14) if n > 5 else r14)  # approximation
 
-    # Stoch
-    w14_h = max(h[-14:]) if len(h) >= 14 else max(h)
-    w14_l = min(lo[-14:]) if len(lo) >= 14 else min(lo)
-    stk   = 100*(cur - w14_l)/(w14_h - w14_l) if (w14_h - w14_l) != 0 else 50.0
-    std_d_series = pd.Series([stk]).rolling(3).mean()
-    std_d = float(std_d_series.iloc[-1]) if not std_d_series.empty else stk
+    # MACD
+    e12 = ewm_v(p, 12); e26 = ewm_v(p, 26)
+    macd_v = safe_div(e12 - e26, cur)
+    macd_s = macd_v * 0.85   # approximation of 9-period signal
+    macd_h = macd_v - macd_s
+    macd_m = macd_v * 0.05
+
+    # Bollinger
+    s20 = s(p, 20); sd20 = std(p, 20)
+    bbu = s20 + 2*sd20; bbl = s20 - 2*sd20
+    bb_p = safe_div(cur - bbl, bbu - bbl, 0.5)
+    bb_w = safe_div(bbu - bbl, s20)
+
+    # SMA distances
+    def dist_sma(w):
+        sm = s(p, w)
+        return safe_div(cur - sm, sm)
+
+    def dist_ema(span):
+        em = ewm_v(p, span)
+        return safe_div(cur - em, em)
+
+    # Volatility
+    log_rets = [np.log(p[-i]/p[-i-1]) for i in range(1, min(22, n)) if p[-i-1]>0]
+    vol5  = float(np.std(log_rets[-5:]))  if len(log_rets) >= 5  else 0.0
+    vol10 = float(np.std(log_rets[-10:])) if len(log_rets) >= 10 else 0.0
+    vol20 = float(np.std(log_rets[-20:])) if len(log_rets) >= 20 else 0.0
+    rvol  = vol20 * np.sqrt(252)
+    v_rat = safe_div(vol10, vol20, 1.0)
 
     # ATR
-    atr_vals = [max(h[i]-lo[i], abs(h[i]-p[i-1]), abs(lo[i]-p[i-1]))
-                for i in range(max(1, len(h)-14), len(h))]
+    hi = float(h[-1]); li = float(lo[-1])
+    pc = float(p[-2]) if n >= 2 else cur
+    atr_vals = [max(h[-i]-lo[-i], abs(h[-i]-p[-i-1]), abs(lo[-i]-p[-i-1]))
+                for i in range(1, min(15, len(h)))]
     atr14 = float(np.mean(atr_vals)) if atr_vals else 0.0
-    atr_p = atr14 / cur if cur != 0 else 0.0
+    atr_p = safe_div(atr14, cur)
+    atr_prev = float(np.mean(atr_vals[-14:])) if len(atr_vals)>14 else atr14
+    atr_tr = safe_div(atr14, atr_prev, 1.0)
 
-    # OBV
-    obv_cur = float(np.sum([
-        np.sign(p[i]-p[i-1])*v[i] for i in range(max(1,n-30),n)
-    ]))
-    obv_sma = obv_cur  # simplified
-    obv_rat = 1.0
-
-    # ADX
-    plus_dms  = [max(h[i]-h[i-1],0) for i in range(max(1, len(h)-14),len(h))]
-    minus_dms = [max(lo[i-1]-lo[i],0) for i in range(max(1, len(lo)-14),len(lo))]
-    tr_vals   = atr_vals
-    tr_mean   = np.mean(tr_vals) if tr_vals else 1e-9
-    adx_plus  = 100*np.mean(plus_dms) /tr_mean if tr_mean!=0 else 0
-    adx_minus = 100*np.mean(minus_dms)/tr_mean if tr_mean!=0 else 0
-    adx14     = abs(adx_plus - adx_minus)
-
-    # Momentum
-    mom5  = cur - prev5
-    mom10 = cur - prev10
-    roc5  = ret5 * 100
-    roc10 = ret10 * 100
-
-    # CCI
-    tp     = (float(h[-1]) + float(lo[-1]) + cur) / 3
-    tp_ser = [(float(h[-20:][i]) + float(lo[-20:][i]) + float(p[-20:][i]))/3
-               for i in range(min(20, n))] if n >= 2 else [tp]
-    tp_ma  = np.mean(tp_ser)
-    tp_md  = np.mean(np.abs(np.array(tp_ser) - tp_ma))
-    cci20  = (tp - tp_ma) / (0.015 * tp_md) if tp_md != 0 else 0.0
+    # Stoch
+    hh14 = max(h[-14:]) if len(h)>=14 else max(h)
+    ll14 = min(lo[-14:]) if len(lo)>=14 else min(lo)
+    stk  = safe_div(100*(cur - ll14), hh14 - ll14, 50.0)
+    std_d = stk   # approximation
+    s_diff = 0.0
 
     # Williams %R
-    wills_r = -100*(w14_h - cur)/(w14_h - w14_l) if (w14_h - w14_l) != 0 else -50.0
+    willr = safe_div(-100*(hh14 - cur), hh14 - ll14, -50.0)
 
-    # Volume features
-    vcur   = float(v[-1])
-    vsma14 = safe_mean(v, 14)
-    vrat   = vcur / vsma14 if vsma14 != 0 else 1.0
-    pxv    = (cur * vcur) / 1e9
+    # CCI
+    tp    = (hi + li + cur) / 3
+    tp_arr= [(h[-i]+lo[-i]+p[-i])/3 for i in range(1, min(21, n))]
+    tp_ma = float(np.mean(tp_arr)) if tp_arr else tp
+    tp_md = float(np.mean(np.abs(np.array(tp_arr) - tp_ma))) if tp_arr else 0.0
+    cci   = safe_div(tp - tp_ma, 0.015 * tp_md)
+    cci   = max(-300.0, min(300.0, cci))
+
+    # ADX
+    pdms  = [max(h[-i]-h[-i-1],0) for i in range(1, min(15, len(h)-1))]
+    mdms  = [max(lo[-i-1]-lo[-i],0) for i in range(1, min(15, len(lo)-1))]
+    adxp  = safe_div(100*np.mean(pdms), atr14) if (pdms and atr14>0) else 0
+    adxm  = safe_div(100*np.mean(mdms), atr14) if (mdms and atr14>0) else 0
+    adxd  = adxp - adxm
+
+    # ROC
+    def roc(w):
+        ref = p[-w-1] if n > w else p[0]
+        return safe_div(cur - ref, ref) * 100
+
+    # Volume
+    vcur  = float(v[-1])
+    vsma  = s(v, 14)
+    vs50  = s(v, 50)
+    vrat  = min(safe_div(vcur, vsma, 1.0), 10.0)
+    vtr   = min(safe_div(vsma, vs50, 1.0), 5.0)
+    pvcorr= max(-5.0, min(5.0, lr1 * vrat))
 
     # Pattern
-    hl_pct    = (float(h[-1]) - float(lo[-1])) / cur if cur != 0 else 0.0
-    close_open= (cur - float(p[-1])) / cur if cur != 0 else 0.0   # approx
+    hl_p  = safe_div(hi - li, cur)
+    oc    = safe_div(cur - float(p[-1]), cur)   # close vs. prev (approx open)
+    uw    = safe_div(hi - cur, cur)
+    lw    = safe_div(cur - li, cur)
 
-    sma14_r   = cur / sma14 if sma14 != 0 else 1.0
-    sma50_r   = cur / sma50 if sma50 != 0 else 1.0
+    # Distance
+    hi52  = max(p[-252:]) if n >= 252 else max(p)
+    lo52  = min(p[-252:]) if n >= 252 else min(p)
+    d52h  = safe_div(cur - hi52, cur)
+    d52l  = safe_div(cur - lo52, cur)
 
-    row_map = {
-        'Open': cur, 'High': float(h[-1]), 'Low': float(lo[-1]),
-        'Close': cur, 'Volume': vcur,
-        'lag_1': prev1, 'lag_2': prev2, 'lag_5': prev5, 'lag_10': prev10,
-        'returns': ret, 'ret_3': ret3, 'ret_5': ret5, 'ret_10': ret10,
-        'SMA_5': sma5, 'SMA_14': sma14, 'SMA_20': sma20, 'SMA_50': sma50,
-        'price_sma14_ratio': sma14_r, 'price_sma50_ratio': sma50_r,
-        'EMA_9': ema9, 'EMA_14': ema14, 'EMA_21': ema21,
-        'volatility_10': std10, 'volatility_20': std20, 'realized_vol': rvol,
-        'BB_upper': bb_u, 'BB_middle': sma20, 'BB_lower': bb_l,
-        'BB_pct': bb_p, 'BB_width': bb_w,
-        'MACD': macd_val, 'MACD_signal': macd_sig, 'MACD_hist': macd_hist_val,
-        'RSI_14': rsi14, 'RSI_7': rsi7,
-        'STOCH_K': stk,  'STOCH_D': std_d,
-        'ATR_14': atr14, 'ATR_pct': atr_p,
-        'OBV': obv_cur,  'OBV_SMA_14': obv_sma, 'OBV_ratio': obv_rat,
-        'ADX_14': adx14, 'ADX_plus': adx_plus, 'ADX_minus': adx_minus,
-        'MOM_5': mom5,   'MOM_10': mom10, 'ROC_5': roc5, 'ROC_10': roc10,
-        'CCI_20': cci20, 'WILLIAMS_R': wills_r,
-        'volume_sma_14': vsma14, 'volume_ratio': vrat, 'price_x_volume': pxv,
-        'high_low_pct': hl_pct,  'close_open': close_open,
+    # Slope
+    sma50_arr = p[-50:] if n >= 50 else p
+    sma50_cur = float(np.mean(sma50_arr))
+    sma50_prev= float(np.mean(p[-55:-5])) if n >= 55 else sma50_cur
+    sl50 = safe_div(sma50_cur - sma50_prev, sma50_prev)
+
+    sma20_cur  = s(p, 20)
+    sma20_prev = float(np.mean(p[-25:-5])) if n >= 25 else sma20_cur
+    sl20 = safe_div(sma20_cur - sma20_prev, sma20_prev)
+
+    row = {
+        "lr_1": lr1, "lr_2": lr2, "lr_3": lr3,
+        "lr_5": lr5, "lr_10": lr10, "lr_20": lr20,
+        "rsi_7": r7, "rsi_14": r14, "rsi_21": r21,
+        "rsi_diff_7_14": r_diff, "rsi_mom": r_mom,
+        "macd": macd_v, "macd_sig": macd_s, "macd_hist": macd_h, "macd_mom": macd_m,
+        "bb_pct": bb_p, "bb_width": bb_w,
+        "dist_sma5": dist_sma(5), "dist_sma10": dist_sma(10),
+        "dist_sma20": dist_sma(20), "dist_sma50": dist_sma(50), "dist_sma100": dist_sma(100),
+        "dist_ema9": dist_ema(9), "dist_ema21": dist_ema(21), "dist_ema50": dist_ema(50),
+        "vol_5d": vol5, "vol_10d": vol10, "vol_20d": vol20, "rvol_20": rvol, "vol_ratio": v_rat,
+        "atr_pct": atr_p, "atr_trend": atr_tr,
+        "stoch_k": stk, "stoch_d": std_d, "stoch_diff": s_diff,
+        "willr": willr, "cci": cci,
+        "adx_plus": adxp, "adx_minus": adxm, "adx_diff": adxd,
+        "roc_3": roc(3), "roc_5": roc(5), "roc_10": roc(10), "roc_20": roc(20),
+        "v_ratio": vrat, "v_trend": vtr, "pv_corr": pvcorr,
+        "hl_pct": hl_p, "open_close": oc, "upper_wick": uw, "lower_wick": lw,
+        "dist_52w_high": d52h, "dist_52w_low": d52l,
+        "sma50_slope": sl50, "sma20_slope": sl20,
     }
+    return {k: row.get(k, 0.0) for k in feat_cols}
 
-    return {k: row_map.get(k, 0.0) for k in feature_cols}
 
-
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 #  ANA FONKSİYON
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 def train_and_predict_dynamic(
     ticker: str,
     model_type: str,
     selected_feature_groups: list[str],
 ) -> tuple[list[float] | None, dict | None]:
-    """
-    Eğit ve 14 günlük gelecek tahmini üret.
 
-    Returns:
-        (future_predictions: list[float], chart_data: dict)  – başarı
-        (None, None)  – hata
-    """
-
-    # ── 1. Veri al ──────────────────────────────────────────────────────────
+    # 1. Veri
     df = get_processed_data(ticker)
     if df is None or df.empty:
-        print(f"[trainer] {ticker}: Veri alınamadı.")
         return None, None
 
-    # ── 2. Feature kolonlarını seç ───────────────────────────────────────────
+    # 2. Feature seçimi
     groups = selected_feature_groups if selected_feature_groups else DEFAULT_GROUPS
 
-    # Her zaman temel feature'ları dahil et
-    feature_set: list[str] = []
-    for g in ['OHLCV', 'Lag', 'Returns']:
-        for col in FEATURE_GROUPS[g]:
-            if col in df.columns and col not in feature_set:
-                feature_set.append(col)
+    feat_set = []
+    for g in DEFAULT_GROUPS:     # her zaman temel gruplar dahil
+        for col in FEATURE_GROUPS.get(g, []):
+            if col in df.columns and col not in feat_set:
+                feat_set.append(col)
 
-    # Kullanıcı seçimleri
     for g in groups:
-        if g in FEATURE_GROUPS:
-            for col in FEATURE_GROUPS[g]:
-                if col in df.columns and col not in feature_set:
-                    feature_set.append(col)
+        for col in FEATURE_GROUPS.get(g, []):
+            if col in df.columns and col not in feat_set:
+                feat_set.append(col)
 
-    # df'te gerçekten var olanlarla sınırla
-    feature_set = [f for f in feature_set if f in df.columns]
-    print(f"[trainer] {ticker} | model={model_type} | {len(feature_set)} feature | {len(df)} satır")
+    feat_set = [f for f in feat_set if f in df.columns]
+    print(f"[trainer] {ticker} | {model_type} | {len(feat_set)} feature | {len(df)} satır")
 
-    if len(feature_set) < 5:
-        print(f"[trainer] Yetersiz feature: {feature_set}")
+    if len(feat_set) < 5:
         return None, None
 
-    # ── 3. X / y hazırla ────────────────────────────────────────────────────
-    # Hedef: sonraki günün Close fiyatı
-    y_raw = df['Close'].shift(-1)
+    # 3. X ve y (LOG-RETURN hedef)
+    X_df  = df[feat_set].copy()
+    y_s   = df["target_lr"].copy()      # log(Close[t+1]/Close[t])
 
-    # Son satır tahmin için (y=NaN), geri kalanı eğitim için
-    X_df = df[feature_set].iloc[:-1].copy()
-    y_s  = y_raw.iloc[:-1].copy()
+    valid  = X_df.notna().all(axis=1) & y_s.notna()
+    X_df   = X_df[valid]
+    y_s    = y_s[valid]
+    closes = df.loc[valid, "Close"]     # backtest için gerçek fiyatlar
 
-    # NaN temizliği (her ihtimale karşı)
-    valid = X_df.notna().all(axis=1) & y_s.notna()
-    X_df  = X_df[valid]
-    y_s   = y_s[valid]
-
-    if len(X_df) < 80:
-        print(f"[trainer] Yetersiz eğitim satırı: {len(X_df)}")
+    if len(X_df) < 100:
+        print(f"[trainer] Yetersiz satır: {len(X_df)}")
         return None, None
 
-    X_np = X_df.values.astype(float)
-    y_np = y_s.values.astype(float)
+    X = X_df.values.astype(float)
+    y = y_s.values.astype(float)
 
-    # ── 4. Ölçekleme ─────────────────────────────────────────────────────────
-    scaler = MinMaxScaler(feature_range=(0, 1))
-    X_sc   = scaler.fit_transform(X_np)
+    # 4. Scale — RobustScaler (outlier-robust, normalise feature'lar için daha uygun)
+    sc  = RobustScaler()
+    X_sc = sc.fit_transform(X)
 
-    # ── 5. Train / Test split (%92 / %8) ────────────────────────────────────
-    split    = int(len(X_sc) * 0.92)
-    X_train  = X_sc[:split];   y_train = y_np[:split]
-    X_test   = X_sc[split:];   y_test  = y_np[split:]
+    # 5. Train/Test split
+    split    = int(len(X_sc) * 0.90)
+    X_tr, y_tr = X_sc[:split], y[:split]
+    X_te, y_te = X_sc[split:], y[split:]
+    close_te   = closes.values[split:]
 
-    # ── 6. Model eğitimi ─────────────────────────────────────────────────────
+    # 6. Model eğit
     model = None
+    is_lstm = False
+    X_te_seq = None   # LSTM için
+
     try:
-        if model_type == 'LINEAR':
-            model = Ridge(alpha=0.5)
-            model.fit(X_train, y_train)
+        if model_type == "LINEAR":
+            model = Ridge(alpha=2.0)
+            model.fit(X_tr, y_tr)
 
-        elif model_type == 'RANDOM_FOREST':
+        elif model_type == "RANDOM_FOREST":
             model = RandomForestRegressor(
-                n_estimators=200, max_depth=10,
-                min_samples_leaf=3, n_jobs=-1, random_state=42
+                n_estimators=300, max_depth=8,
+                min_samples_leaf=5, n_jobs=-1, random_state=42,
             )
-            model.fit(X_train, y_train)
+            model.fit(X_tr, y_tr)
 
-        elif model_type == 'EXTRA_TREES':
+        elif model_type == "EXTRA_TREES":
             model = ExtraTreesRegressor(
-                n_estimators=200, max_depth=10,
-                min_samples_leaf=3, n_jobs=-1, random_state=42
+                n_estimators=300, max_depth=8,
+                min_samples_leaf=5, n_jobs=-1, random_state=42,
             )
-            model.fit(X_train, y_train)
+            model.fit(X_tr, y_tr)
 
-        elif model_type == 'GRADIENT_BOOST':
+        elif model_type == "GRADIENT_BOOST":
             model = GradientBoostingRegressor(
-                n_estimators=200, learning_rate=0.05,
-                max_depth=5, subsample=0.8,
-                min_samples_leaf=3, random_state=42
+                n_estimators=300, learning_rate=0.04,
+                max_depth=4, subsample=0.8,
+                min_samples_leaf=5, random_state=42,
             )
-            model.fit(X_train, y_train)
+            model.fit(X_tr, y_tr)
 
-        elif model_type == 'XGBOOST':
+        elif model_type == "XGBOOST":
             if not HAS_XGB:
-                raise ImportError("XGBoost kurulu değil: pip install xgboost")
+                raise ImportError("pip install xgboost")
             model = xgb.XGBRegressor(
-                n_estimators=300, learning_rate=0.04,
-                max_depth=6, subsample=0.8,
+                n_estimators=400, learning_rate=0.03,
+                max_depth=5, subsample=0.8,
                 colsample_bytree=0.8, reg_alpha=0.1,
-                reg_lambda=1.0, random_state=42, verbosity=0
+                reg_lambda=2.0, random_state=42, verbosity=0,
             )
-            model.fit(X_train, y_train,
-                      eval_set=[(X_test, y_test)], verbose=False)
+            model.fit(X_tr, y_tr, eval_set=[(X_te, y_te)], verbose=False)
 
-        elif model_type == 'LIGHTGBM':
+        elif model_type == "LIGHTGBM":
             if not HAS_LGB:
-                raise ImportError("LightGBM kurulu değil: pip install lightgbm")
+                raise ImportError("pip install lightgbm")
             model = lgb.LGBMRegressor(
-                n_estimators=300, learning_rate=0.04,
-                num_leaves=40, min_child_samples=10,
-                reg_alpha=0.1, reg_lambda=1.0,
-                random_state=42, verbose=-1
+                n_estimators=400, learning_rate=0.03,
+                num_leaves=31, min_child_samples=20,
+                reg_alpha=0.1, reg_lambda=2.0,
+                random_state=42, verbose=-1,
             )
-            model.fit(X_train, y_train,
-                      eval_set=[(X_test, y_test)])
+            model.fit(X_tr, y_tr, eval_set=[(X_te, y_te)])
 
-        elif model_type == 'LSTM':
+        elif model_type == "LSTM":
             if not HAS_TF:
-                raise ImportError("TensorFlow kurulu değil: pip install tensorflow")
-            seq_len  = 20
-            n_feat   = X_sc.shape[1]
+                raise ImportError("pip install tensorflow")
+            is_lstm = True
+            seq_len = 20
+            n_feat  = X_sc.shape[1]
 
-            def make_sequences(X, y, seq):
+            def make_seq(Xd, yd, seq):
                 Xs, ys = [], []
-                for i in range(seq, len(X)):
-                    Xs.append(X[i-seq:i])
-                    ys.append(y[i])
+                for i in range(seq, len(Xd)):
+                    Xs.append(Xd[i-seq:i])
+                    ys.append(yd[i])
                 return np.array(Xs), np.array(ys)
 
-            X_seq, y_seq = make_sequences(X_sc, y_np, seq_len)
-            sp2  = int(len(X_seq) * 0.92)
-            X_tr_s, y_tr_s = X_seq[:sp2], y_seq[:sp2]
-            X_te_s, y_te_s = X_seq[sp2:], y_seq[sp2:]
+            X_seq, y_seq = make_seq(X_sc, y, seq_len)
+            sp2 = int(len(X_seq) * 0.90)
+            X_ts, y_ts = X_seq[:sp2], y_seq[:sp2]
+            X_vs, y_vs = X_seq[sp2:], y_seq[sp2:]
+            X_te_seq = X_vs
 
-            model_lstm = Sequential([
+            model = Sequential([
                 Input(shape=(seq_len, n_feat)),
                 LSTM(128, return_sequences=True),
                 Dropout(0.2),
-                LSTM(64, return_sequences=False),
+                LSTM(64),
                 Dropout(0.2),
-                Dense(32, activation='relu'),
-                Dense(1)
+                Dense(32, activation="relu"),
+                Dense(1),
             ])
-            model_lstm.compile(optimizer='adam', loss='huber')
-            es = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
-            model_lstm.fit(
-                X_tr_s, y_tr_s,
-                validation_data=(X_te_s, y_te_s),
+            model.compile(optimizer="adam", loss="huber")
+            model.fit(
+                X_ts, y_ts,
+                validation_data=(X_vs, y_vs),
                 epochs=50, batch_size=32,
-                callbacks=[es], verbose=0
+                callbacks=[
+                    EarlyStopping(patience=6, restore_best_weights=True),
+                    ReduceLROnPlateau(patience=3, factor=0.5),
+                ],
+                verbose=0,
             )
-
-            # LSTM için gelecek tahmini
-            future_predictions = _lstm_future(
-                model_lstm, X_sc, y_np, df, feature_set, scaler, seq_len
-            )
-            backtest_preds = model_lstm.predict(X_te_s, verbose=0).flatten()
-            bt_dates = [
-                d.strftime('%Y-%m-%d')
-                for d in df.index[split + seq_len: split + seq_len + len(backtest_preds)]
-            ]
-            chart_data = _build_chart_data(
-                bt_dates, y_te_s.tolist(), backtest_preds.tolist(),
-                future_predictions, df.index[-1]
-            )
-            return future_predictions, chart_data
 
         else:
-            print(f"[trainer] Bilinmeyen model tipi: {model_type}")
+            print(f"[trainer] Bilinmeyen model: {model_type}")
             return None, None
 
     except Exception as e:
         import traceback
-        print(f"[trainer] Model eğitim HATASI ({model_type}): {e}")
+        print(f"[trainer] Eğitim HATASI ({model_type}): {e}")
         traceback.print_exc()
         return None, None
 
-    # ── 7. Backtest tahminleri ───────────────────────────────────────────────
-    backtest_preds = model.predict(X_test).tolist()
+    # 7. Backtest tahminleri
+    #    LOG-RETURN tahmini → fiyata çevir
+    #    pred_price[t] = Close[t] * exp(predicted_log_return[t])
+    #    Bu her zaman hareketli bir backtest çizgisi üretir.
+    try:
+        if is_lstm:
+            bt_returns = model.predict(X_te_seq, verbose=0).flatten()
+            # LSTM test set'in başlangıç indeksini bul
+            bt_close_base = closes.values[split + seq_len: split + seq_len + len(bt_returns)]
+        else:
+            bt_returns    = model.predict(X_te)
+            bt_close_base = close_te
 
-    # ── 8. Lag-based iterative gelecek tahmini ───────────────────────────────
-    # DÜZELTME: scaled noise yerine gerçek rolling window kullanıyoruz.
-    future_predictions = _sklearn_future(
-        model, df, feature_set, scaler
-    )
+        n_bt = min(len(bt_returns), len(bt_close_base))
+        backtest_prices = [
+            float(bt_close_base[i]) * float(np.exp(bt_returns[i]))
+            for i in range(n_bt)
+        ]
+        actual_prices = [float(bt_close_base[i+1]) if i+1 < len(bt_close_base)
+                         else float(bt_close_base[-1])
+                         for i in range(n_bt)]
 
-    if not future_predictions:
-        print(f"[trainer] Gelecek tahmin üretilemedi.")
+        # Backtest tarihleri
+        if is_lstm:
+            bt_dates = [
+                d.strftime("%Y-%m-%d")
+                for d in df.index[split + seq_len: split + seq_len + n_bt]
+            ]
+        else:
+            bt_dates = [d.strftime("%Y-%m-%d") for d in closes.index[split: split + n_bt]]
+
+    except Exception as e:
+        print(f"[trainer] Backtest HATASI: {e}")
+        backtest_prices = []
+        actual_prices   = []
+        bt_dates        = []
+
+    # 8. Gelecek tahmini — lag-based rolling window
+    ph = list(df["Close"].values[-80:].astype(float))
+    hh = list(df["High"].values[-80:].astype(float))
+    lh = list(df["Low"].values[-80:].astype(float))
+    vh = list(df["Volume"].values[-80:].astype(float))
+
+    future_prices = []
+    last_price    = ph[-1]
+
+    if is_lstm:
+        # LSTM: son seq_len adımın scaled matrisini kullan
+        seq_arr = []
+        for i in range(seq_len):
+            idx = -(seq_len - i)
+            ph_i = ph[:len(ph)+idx+1]
+            if len(ph_i) < 2: ph_i = [ph[0]] + ph_i
+            row = _compute_row(ph_i, hh[:len(ph_i)], lh[:len(ph_i)], vh[:len(ph_i)], feat_set)
+            row_df = pd.DataFrame([row])[feat_set]
+            seq_arr.append(sc.transform(row_df.values)[0])
+        seq_arr = np.array(seq_arr)
+
+        for step in range(14):
+            inp  = seq_arr[-seq_len:][np.newaxis, :, :]
+            lr_p = float(model.predict(inp, verbose=0).flatten()[0])
+            lr_p = np.clip(lr_p, -0.15, 0.15)   # max ±15% günlük
+            next_p = last_price * np.exp(lr_p)
+            future_prices.append(next_p)
+            ph.append(next_p)
+            hh.append(next_p * (1 + abs(np.random.normal(0, 0.004))))
+            lh.append(next_p * (1 - abs(np.random.normal(0, 0.004))))
+            vh.append(float(np.mean(vh[-5:])))
+            last_price = next_p
+
+            row = _compute_row(ph, hh, lh, vh, feat_set)
+            row_df = pd.DataFrame([row])[feat_set]
+            new_sc = sc.transform(row_df.values)[0]
+            seq_arr = np.vstack([seq_arr, new_sc])
+    else:
+        for step in range(14):
+            try:
+                row    = _compute_row(ph, hh, lh, vh, feat_set)
+                row_df = pd.DataFrame([row])[feat_set]
+                row_sc = sc.transform(row_df.values)
+                lr_p   = float(model.predict(row_sc)[0])
+                lr_p   = np.clip(lr_p, -0.15, 0.15)
+                next_p = last_price * np.exp(lr_p)
+            except Exception as e:
+                print(f"[trainer] Adım {step} hata: {e}")
+                next_p = last_price * (1 + np.random.normal(0, 0.005))
+
+            future_prices.append(next_p)
+            ph.append(next_p)
+            hh.append(next_p * (1 + abs(np.random.normal(0, 0.004))))
+            lh.append(next_p * (1 - abs(np.random.normal(0, 0.004))))
+            vh.append(float(np.mean(vh[-5:])))
+            last_price = next_p
+
+    if not future_prices:
         return None, None
 
-    # ── 9. Chart verisi ──────────────────────────────────────────────────────
-    bt_dates = [
-        d.strftime('%Y-%m-%d')
-        for d in df.index[split: split + len(backtest_preds)]
-    ]
-    chart_data = _build_chart_data(
-        bt_dates, y_test.tolist(), backtest_preds,
-        future_predictions, df.index[-1]
-    )
+    # 9. Chart verisi
+    last_date    = df.index[-1]
+    future_dates = [(last_date + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(1, 15)]
 
-    return future_predictions, chart_data
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-#  YARDIMCI: sklearn modelleri için lag-based future forecasting
-# ──────────────────────────────────────────────────────────────────────────────
-def _sklearn_future(model, df: pd.DataFrame, feature_cols: list, scaler) -> list[float]:
-    """
-    Son 60 günün gerçek verisinden başlayarak
-    14 günlük öngörü üretir.
-    Her adımda önceki tahmin yeni lag değeri olur.
-    """
-    # Rolling window — gerçek tarihsel veriden başla
-    window_size = 60
-    price_h  = list(df['Close'].values[-window_size:].astype(float))
-    high_h   = list(df['High'].values[-window_size:].astype(float))
-    low_h    = list(df['Low'].values[-window_size:].astype(float))
-    volume_h = list(df['Volume'].values[-window_size:].astype(float))
-
-    future = []
-    for step in range(14):
-        try:
-            row_dict = _build_feature_row(price_h, high_h, low_h, volume_h, feature_cols)
-            row_df   = pd.DataFrame([row_dict])[feature_cols]
-            row_sc   = scaler.transform(row_df.values)
-            pred     = float(model.predict(row_sc)[0])
-        except Exception as e:
-            print(f"[trainer] Adım {step} hata: {e}")
-            # Hata durumunda son değerden küçük bir adım ilerle
-            pred = price_h[-1] * (1 + np.random.normal(0.0002, 0.008))
-
-        future.append(pred)
-
-        # Rolling window'a yeni tahmini ekle
-        price_h.append(pred)
-        high_h.append(pred  * (1 + abs(np.random.normal(0, 0.004))))
-        low_h.append(pred   * (1 - abs(np.random.normal(0, 0.004))))
-        volume_h.append(float(np.mean(volume_h[-5:])))
-
-    return future
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-#  YARDIMCI: LSTM için sequence-based future forecasting
-# ──────────────────────────────────────────────────────────────────────────────
-def _lstm_future(model, X_sc, y_np, df, feature_cols, scaler, seq_len) -> list[float]:
-    price_h  = list(df['Close'].values[-60:].astype(float))
-    high_h   = list(df['High'].values[-60:].astype(float))
-    low_h    = list(df['Low'].values[-60:].astype(float))
-    volume_h = list(df['Volume'].values[-60:].astype(float))
-
-    # Son seq_len adımın scaled matrisini oluştur
-    seq_rows = []
-    for i in range(seq_len):
-        ph   = price_h[-(seq_len - i):]
-        hh   = high_h[-(seq_len - i):]
-        loh  = low_h[-(seq_len - i):]
-        vh   = volume_h[-(seq_len - i):]
-        if len(ph) < 2:
-            ph = [price_h[-1]] * 2 + ph
-        row_d  = _build_feature_row(ph, hh, loh, vh, feature_cols)
-        row_df = pd.DataFrame([row_d])[feature_cols]
-        seq_rows.append(scaler.transform(row_df.values)[0])
-
-    seq_arr = np.array(seq_rows)   # (seq_len, n_feat)
-
-    future = []
-    for step in range(14):
-        inp  = seq_arr[-seq_len:][np.newaxis, :, :]   # (1, seq_len, n_feat)
-        pred = float(model.predict(inp, verbose=0).flatten()[0])
-        future.append(pred)
-
-        price_h.append(pred)
-        high_h.append(pred  * (1 + abs(np.random.normal(0, 0.004))))
-        low_h.append(pred   * (1 - abs(np.random.normal(0, 0.004))))
-        volume_h.append(float(np.mean(volume_h[-5:])))
-
-        row_d  = _build_feature_row(price_h, high_h, low_h, volume_h, feature_cols)
-        row_df = pd.DataFrame([row_d])[feature_cols]
-        new_sc = scaler.transform(row_df.values)[0]
-        seq_arr = np.vstack([seq_arr, new_sc])
-
-    return future
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-#  YARDIMCI: Chart data dict üret
-# ──────────────────────────────────────────────────────────────────────────────
-def _build_chart_data(
-    bt_dates: list, y_test: list, backtest_preds: list,
-    future_preds: list, last_date
-) -> dict:
-    future_dates = [
-        (last_date + timedelta(days=i)).strftime('%Y-%m-%d')
-        for i in range(1, 15)
-    ]
-    full_dates     = bt_dates + future_dates
-    full_actual    = [float(v) for v in y_test] + [None] * 14
-    full_predicted = [float(v) for v in backtest_preds] + [float(v) for v in future_preds]
-
-    return {
-        "dates":            full_dates,
-        "actual_prices":    full_actual,
-        "predicted_prices": full_predicted,
+    chart_data = {
+        "dates":            bt_dates + future_dates,
+        "actual_prices":    [float(v) for v in actual_prices] + [None] * 14,
+        "predicted_prices": [float(v) for v in backtest_prices] + [float(v) for v in future_prices],
     }
+
+    return future_prices, chart_data

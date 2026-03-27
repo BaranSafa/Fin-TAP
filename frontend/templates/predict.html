@@ -184,23 +184,33 @@
         <!-- Feature checkboxes -->
         <div class="card card-pad">
             <div class="sec-label">// TECHNICAL INDICATORS — FEATURE SELECTION</div>
-            <p style="font-size:0.78rem; color:var(--text2); margin-bottom:14px;">Select which indicators the model will use as input features:</p>
+            <p style="font-size:0.78rem; color:var(--text2); margin-bottom:8px;">
+                Select indicators. <span style="color:var(--amber);">⚠ Conflicting groups auto-deselect.</span>
+            </p>
+            <div id="conflict-warn" style="display:none; font-family:var(--mono); font-size:0.62rem; color:var(--amber); background:rgba(255,167,38,0.07); border:1px solid rgba(255,167,38,0.2); border-radius:5px; padding:6px 10px; margin-bottom:10px;"></div>
             <div class="feature-grid" id="feature-checkboxes">
-                <label class="cb-label"><input type="checkbox" value="RSI"        checked> RSI (7 &amp; 14)</label>
-                <label class="cb-label"><input type="checkbox" value="MACD"       checked> MACD + Signal</label>
-                <label class="cb-label"><input type="checkbox" value="Bollinger"  checked> Bollinger Bands</label>
-                <label class="cb-label"><input type="checkbox" value="SMA"        checked> SMA (5/14/20/50)</label>
-                <label class="cb-label"><input type="checkbox" value="EMA"        checked> EMA (9/14/21)</label>
-                <label class="cb-label"><input type="checkbox" value="Volatility" checked> Volatility / RVol</label>
-                <label class="cb-label"><input type="checkbox" value="ATR"        checked> ATR (True Range)</label>
-                <label class="cb-label"><input type="checkbox" value="Momentum"   checked> Momentum / ROC</label>
-                <label class="cb-label"><input type="checkbox" value="ADX"            > ADX (Trend Str)</label>
-                <label class="cb-label"><input type="checkbox" value="Stoch"          > Stochastic (K/D)</label>
-                <label class="cb-label"><input type="checkbox" value="OBV"            > OBV (Volume)</label>
-                <label class="cb-label"><input type="checkbox" value="CCI"            > CCI (20)</label>
-                <label class="cb-label"><input type="checkbox" value="Williams"        > Williams %R</label>
-                <label class="cb-label"><input type="checkbox" value="Volume"          > Volume Ratios</label>
-                <label class="cb-label"><input type="checkbox" value="Pattern"         > Price Patterns</label>
+                <!-- MOMENTUM GROUP -->
+                <label class="cb-label" data-group="momentum"><input type="checkbox" value="RSI"       checked data-conflicts=""> RSI (7, 14, 21)</label>
+                <label class="cb-label" data-group="momentum"><input type="checkbox" value="Momentum"  checked data-conflicts=""> ROC / Momentum</label>
+                <label class="cb-label" data-group="momentum"><input type="checkbox" value="Stoch"           data-conflicts="Williams"> Stochastic K/D</label>
+                <label class="cb-label" data-group="momentum"><input type="checkbox" value="Williams"         data-conflicts="Stoch"> Williams %R</label>
+                <label class="cb-label" data-group="momentum"><input type="checkbox" value="CCI"             data-conflicts=""> CCI (20)</label>
+                <!-- TREND GROUP -->
+                <label class="cb-label" data-group="trend"><input type="checkbox" value="MACD"     checked data-conflicts=""> MACD + Signal</label>
+                <label class="cb-label" data-group="trend"><input type="checkbox" value="SMA"      checked data-conflicts="EMA"> SMA Distance</label>
+                <label class="cb-label" data-group="trend"><input type="checkbox" value="EMA"            data-conflicts="SMA"> EMA Distance</label>
+                <label class="cb-label" data-group="trend"><input type="checkbox" value="ADX"            data-conflicts=""> ADX Trend Str</label>
+                <label class="cb-label" data-group="trend"><input type="checkbox" value="Trend"          data-conflicts=""> SMA Slope</label>
+                <!-- VOLATILITY GROUP -->
+                <label class="cb-label" data-group="vol"><input type="checkbox" value="Bollinger"  checked data-conflicts=""> Bollinger Bands</label>
+                <label class="cb-label" data-group="vol"><input type="checkbox" value="Volatility" checked data-conflicts=""> Volatility / RVol</label>
+                <label class="cb-label" data-group="vol"><input type="checkbox" value="ATR"              data-conflicts=""> ATR True Range</label>
+                <!-- VOLUME GROUP -->
+                <label class="cb-label" data-group="volume"><input type="checkbox" value="Volume"        data-conflicts=""> Volume Ratios</label>
+                <!-- EXTRA -->
+                <label class="cb-label" data-group="extra"><input type="checkbox" value="Pattern"        data-conflicts=""> Price Patterns</label>
+                <label class="cb-label" data-group="extra"><input type="checkbox" value="Distance"       data-conflicts=""> 52W High/Low</label>
+                <label class="cb-label" data-group="extra"><input type="checkbox" value="Returns"  checked data-conflicts=""> Log Returns</label>
             </div>
         </div>
 
@@ -263,6 +273,27 @@ function selectModel(el, val) {
     el.classList.add('selected');
     el.querySelector('input').checked = true;
 }
+
+// Feature conflict detection
+document.querySelectorAll('#feature-checkboxes input[type="checkbox"]').forEach(cb => {
+    cb.addEventListener('change', () => {
+        const conflicts = cb.dataset.conflicts ? cb.dataset.conflicts.split(',').map(s=>s.trim()).filter(Boolean) : [];
+        if (cb.checked && conflicts.length) {
+            conflicts.forEach(cval => {
+                const conflicting = document.querySelector(`#feature-checkboxes input[value="${cval}"]`);
+                if (conflicting && conflicting.checked) {
+                    conflicting.checked = false;
+                    conflicting.closest('.cb-label').style.opacity = '0.5';
+                    setTimeout(() => conflicting.closest('.cb-label').style.opacity = '', 1000);
+                }
+            });
+            const warn = document.getElementById('conflict-warn');
+            warn.textContent = `⚠ Conflicting indicators auto-deselected: ${conflicts.join(', ')}`;
+            warn.style.display = 'block';
+            setTimeout(() => warn.style.display = 'none', 3000);
+        }
+    });
+});
 
 async function runPrediction() {
     const ticker   = document.getElementById('ticker-input').value;

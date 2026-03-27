@@ -1,12 +1,13 @@
 """
-data_manager.py  –  Fin-TAP Backend
-Sıfırdan yazılmış, tüm edge-case'ler kapatılmış veri pipeline.
+data_manager.py  —  Fin-TAP Backend
+Düzeltilen TEMEL SORUN (FLAT LINE):
+  Önceki versiyonda Close, lag_1 gibi raw fiyat değerleri feature olarak
+  kullanılıyordu. Model y = Close[t+1] tahmin ederken trivially
+  Close[t] ≈ Close[t+1] öğreniyordu → BACKTEST DÜZLÜK.
 
-Teşhis edilen sorunlar:
-1. yfinance MultiIndex tuple kolonlar → string flatten
-2. Stoch / RSI sıfıra bölme → inf / NaN
-3. volume int64 → float cast
-4. dropna NaN kontrolü sonrası bile bazı kolonlar NaN kalıyor
+  ÇÖZÜM: Tüm feature'lar göreceli/normalise edildi (raw fiyat YOK).
+  Hedef: log(Close[t+1] / Close[t])  →  return tahmin edip sonra
+         fiyata çeviriyoruz: price = base_price * exp(predicted_return)
 """
 
 import warnings
@@ -18,215 +19,252 @@ import yfinance as yf
 from datetime import datetime
 
 
-# ──────────────────────────────────────────────────────────
-#  YARDIMCI: Güvenli EWM (pandas ewm bazen uyarı verir)
-# ──────────────────────────────────────────────────────────
-def _safe_ewm(series, span):
-    return series.ewm(span=span, adjust=False, min_periods=1).mean()
+def _ewm(s: pd.Series, span: int) -> pd.Series:
+    return s.ewm(span=span, adjust=False, min_periods=1).mean()
 
 
-def get_processed_data(ticker: str, start_date: str = "2018-01-01") -> pd.DataFrame | None:
-    """
-    Verilen ticker için ham OHLCV verisini indirir,
-    teknik indikatörleri hesaplar ve temiz bir DataFrame döndürür.
-
-    Returns:
-        pd.DataFrame  – başarı
-        None          – herhangi bir hata
-    """
+def get_processed_data(ticker: str, start_date: str = "2017-01-01") -> pd.DataFrame | None:
     try:
-        # ── 1. YFinance'dan veri çek ─────────────────────────────────────
-        df = yf.download(
-            ticker,
-            start=start_date,
-            end=datetime.now().strftime('%Y-%m-%d'),
-            progress=False,
-            auto_adjust=True,   # split/dividend düzeltmesi
+        df_raw = yf.download(
+            ticker, start=start_date,
+            end=datetime.now().strftime("%Y-%m-%d"),
+            progress=False, auto_adjust=True,
         )
-
-        if df is None or df.empty:
-            print(f"[data_manager] {ticker}: Boş veri.")
+        if df_raw is None or df_raw.empty:
+            print(f"[data] {ticker}: boş veri.")
             return None
 
-        # ── 2. MultiIndex flatten (yfinance 0.2.x+) ─────────────────────
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = [str(col[0]).strip() for col in df.columns]
+        # MultiIndex flatten
+        if isinstance(df_raw.columns, pd.MultiIndex):
+            df_raw.columns = [str(c[0]).strip() for c in df_raw.columns]
         else:
-            df.columns = [str(c).strip() for c in df.columns]
+            df_raw.columns = [str(c).strip() for c in df_raw.columns]
+        df_raw.columns = df_raw.columns.str.lower()
+        df_raw = df_raw.loc[:, ~df_raw.columns.duplicated(keep="first")]
+        df_raw = df_raw[~df_raw.index.duplicated(keep="last")]
 
-        # Küçük harf
-        df.columns = df.columns.str.lower()
-
-        # Duplicate sütun/index temizliği
-        df = df.loc[:, ~df.columns.duplicated(keep='first')]
-        df = df[~df.index.duplicated(keep='last')]
-
-        # ── 3. Gerekli sütunlar kontrolü ─────────────────────────────────
-        needed = {'open', 'high', 'low', 'close', 'volume'}
-        missing = needed - set(df.columns)
-        if missing:
-            print(f"[data_manager] {ticker}: Eksik sütunlar → {missing}")
+        needed = {"open", "high", "low", "close", "volume"}
+        if not needed.issubset(set(df_raw.columns)):
+            print(f"[data] {ticker}: eksik sütunlar: {needed - set(df_raw.columns)}")
             return None
 
-        # ── 4. Tip düzeltmeleri ──────────────────────────────────────────
         for col in needed:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
+            df_raw[col] = pd.to_numeric(df_raw[col], errors="coerce")
+        df_raw.dropna(subset=list(needed), inplace=True)
 
-        df.dropna(subset=list(needed), inplace=True)
-
-        if len(df) < 100:
-            print(f"[data_manager] {ticker}: Yetersiz satır ({len(df)})")
+        if len(df_raw) < 120:
+            print(f"[data] {ticker}: yetersiz satır ({len(df_raw)}).")
             return None
 
-        # ── 5. Çalışma serileri ──────────────────────────────────────────
-        close  = df['close'].astype(float)
-        high   = df['high'].astype(float)
-        low    = df['low'].astype(float)
-        volume = df['volume'].astype(float)
+        c  = df_raw["close"].astype(float)
+        h  = df_raw["high"].astype(float)
+        lo = df_raw["low"].astype(float)
+        v  = df_raw["volume"].astype(float)
+        op = df_raw["open"].astype(float)
 
-        # ── 6. Lag / Return özellikleri ──────────────────────────────────
-        df['lag_1']   = close.shift(1)
-        df['lag_2']   = close.shift(2)
-        df['lag_5']   = close.shift(5)
-        df['lag_10']  = close.shift(10)
+        out = pd.DataFrame(index=df_raw.index)
 
-        df['returns']  = close.pct_change()
-        df['ret_3']    = close.pct_change(3)
-        df['ret_5']    = close.pct_change(5)
-        df['ret_10']   = close.pct_change(10)
+        # ── Log-returns (gecikmeli) ──────────────────────────────────────
+        lr = np.log(c / c.shift(1))
+        out["lr_1"]  = lr
+        out["lr_2"]  = lr.shift(1)
+        out["lr_3"]  = lr.shift(2)
+        out["lr_5"]  = np.log(c / c.shift(5))  / 5
+        out["lr_10"] = np.log(c / c.shift(10)) / 10
+        out["lr_20"] = np.log(c / c.shift(20)) / 20
 
-        # ── 7. Hareketli Ortalamalar ─────────────────────────────────────
-        df['SMA_5']  = close.rolling(5).mean()
-        df['SMA_14'] = close.rolling(14).mean()
-        df['SMA_20'] = close.rolling(20).mean()
-        df['SMA_50'] = close.rolling(50).mean()
+        # ── RSI ──────────────────────────────────────────────────────────
+        for period in [7, 14, 21]:
+            delta = c.diff()
+            gain  = delta.where(delta > 0, 0.0).rolling(period).mean()
+            loss  = (-delta.where(delta < 0, 0.0)).rolling(period).mean()
+            rs    = gain / loss.replace(0, np.nan)
+            out[f"rsi_{period}"] = (100 - 100 / (1 + rs)).fillna(50)
 
-        df['EMA_9']  = _safe_ewm(close, 9)
-        df['EMA_14'] = _safe_ewm(close, 14)
-        df['EMA_21'] = _safe_ewm(close, 21)
+        out["rsi_diff_7_14"] = out["rsi_14"] - out["rsi_7"]
+        out["rsi_mom"]       = out["rsi_14"].diff(5)
 
-        # Fiyatın SMA'ya uzaklığı (normalise)
-        df['price_sma14_ratio'] = close / df['SMA_14'].replace(0, np.nan)
-        df['price_sma50_ratio'] = close / df['SMA_50'].replace(0, np.nan)
+        # ── MACD (price-relative → no leakage) ───────────────────────────
+        ema12 = _ewm(c, 12)
+        ema26 = _ewm(c, 26)
+        macd  = (ema12 - ema26) / c.replace(0, np.nan)
+        sig   = _ewm(macd, 9)
+        out["macd"]      = macd
+        out["macd_sig"]  = sig
+        out["macd_hist"] = macd - sig
+        out["macd_mom"]  = macd.diff(3)
 
-        # ── 8. Volatilite ────────────────────────────────────────────────
-        df['volatility_10']  = close.rolling(10).std()
-        df['volatility_20']  = close.rolling(20).std()
-        df['log_returns']    = np.log(close / close.shift(1))
-        df['realized_vol']   = df['log_returns'].rolling(20).std() * np.sqrt(252)
+        # ── Bollinger (göreceli) ──────────────────────────────────────────
+        sma20 = c.rolling(20).mean()
+        std20 = c.rolling(20).std()
+        bb_u  = sma20 + 2 * std20
+        bb_l  = sma20 - 2 * std20
+        denom = (bb_u - bb_l).replace(0, np.nan)
+        out["bb_pct"]   = ((c - bb_l) / denom).clip(0, 1)
+        out["bb_width"] = ((bb_u - bb_l) / sma20.replace(0, np.nan))
 
-        # ── 9. Bollinger Bands ───────────────────────────────────────────
-        sma20  = close.rolling(20).mean()
-        std20  = close.rolling(20).std()
-        df['BB_upper']  = sma20 + 2 * std20
-        df['BB_middle'] = sma20
-        df['BB_lower']  = sma20 - 2 * std20
-        # %B: fiyatın bantlar içindeki konumu [0-1]
-        bb_range = (df['BB_upper'] - df['BB_lower']).replace(0, np.nan)
-        df['BB_pct']  = (close - df['BB_lower']) / bb_range
-        # Bant genişliği
-        df['BB_width'] = (df['BB_upper'] - df['BB_lower']) / sma20.replace(0, np.nan)
+        # ── SMA uzaklıkları (price-relative) ─────────────────────────────
+        for w in [5, 10, 20, 50, 100]:
+            sma = c.rolling(w).mean()
+            out[f"dist_sma{w}"] = (c - sma) / sma.replace(0, np.nan)
 
-        # ── 10. MACD ─────────────────────────────────────────────────────
-        ema12 = _safe_ewm(close, 12)
-        ema26 = _safe_ewm(close, 26)
-        df['MACD']        = ema12 - ema26
-        df['MACD_signal'] = _safe_ewm(df['MACD'], 9)
-        df['MACD_hist']   = df['MACD'] - df['MACD_signal']
+        for span in [9, 21, 50]:
+            ema = _ewm(c, span)
+            out[f"dist_ema{span}"] = (c - ema) / ema.replace(0, np.nan)
 
-        # ── 11. RSI ──────────────────────────────────────────────────────
-        delta = close.diff()
-        gain  = delta.where(delta > 0, 0.0).rolling(14).mean()
-        loss  = (-delta.where(delta < 0, 0.0)).rolling(14).mean()
-        rs    = gain / loss.replace(0, np.nan)
-        df['RSI_14'] = (100 - (100 / (1 + rs))).fillna(50)
+        # ── Volatilite ────────────────────────────────────────────────────
+        for w in [5, 10, 20]:
+            out[f"vol_{w}d"] = lr.rolling(w).std()
+        out["rvol_20"] = lr.rolling(20).std() * np.sqrt(252)
+        # Volatilite değişim hızı
+        out["vol_ratio"] = out["vol_10d"] / out["vol_20d"].replace(0, np.nan)
 
-        # RSI(7) – kısa vadeli momentum
-        gain7 = delta.where(delta > 0, 0.0).rolling(7).mean()
-        loss7 = (-delta.where(delta < 0, 0.0)).rolling(7).mean()
-        rs7   = gain7 / loss7.replace(0, np.nan)
-        df['RSI_7'] = (100 - (100 / (1 + rs7))).fillna(50)
-
-        # ── 12. Stochastic ───────────────────────────────────────────────
-        ll14 = low.rolling(14).min()
-        hh14 = high.rolling(14).max()
-        denom = (hh14 - ll14).replace(0, np.nan)
-        df['STOCH_K'] = (100 * (close - ll14) / denom).fillna(50)
-        df['STOCH_D'] = df['STOCH_K'].rolling(3).mean()
-
-        # ── 13. ATR (Average True Range) ─────────────────────────────────
-        prev_close = close.shift(1)
+        # ── ATR (price-relative) ──────────────────────────────────────────
+        prev_c = c.shift(1)
         tr = pd.concat([
-            high - low,
-            (high - prev_close).abs(),
-            (low  - prev_close).abs()
+            h - lo,
+            (h - prev_c).abs(),
+            (lo - prev_c).abs(),
         ], axis=1).max(axis=1)
-        df['ATR_14'] = tr.rolling(14).mean()
-        # Normalised ATR
-        df['ATR_pct'] = df['ATR_14'] / close.replace(0, np.nan)
+        atr14 = tr.rolling(14).mean()
+        out["atr_pct"]   = atr14 / c.replace(0, np.nan)
+        out["atr_trend"] = atr14 / atr14.rolling(14).mean().replace(0, np.nan)
 
-        # ── 14. OBV (On-Balance Volume) ──────────────────────────────────
-        obv = (np.sign(close.diff()) * volume).fillna(0).cumsum()
-        df['OBV']        = obv
-        df['OBV_SMA_14'] = obv.rolling(14).mean()
-        df['OBV_ratio']  = obv / obv.rolling(14).mean().replace(0, np.nan)
+        # ── Stochastic ────────────────────────────────────────────────────
+        ll14 = lo.rolling(14).min()
+        hh14 = h.rolling(14).max()
+        stk  = (100 * (c - ll14) / (hh14 - ll14).replace(0, np.nan)).fillna(50)
+        out["stoch_k"]    = stk
+        out["stoch_d"]    = stk.rolling(3).mean()
+        out["stoch_diff"] = stk - out["stoch_d"]
 
-        # ── 15. ADX (Average Directional Index – basit) ──────────────────
-        plus_dm  = high.diff().clip(lower=0)
-        minus_dm = (-low.diff()).clip(lower=0)
-        tr_roll  = tr.rolling(14).mean().replace(0, np.nan)
-        df['ADX_plus']  = 100 * plus_dm.rolling(14).mean()  / tr_roll
-        df['ADX_minus'] = 100 * minus_dm.rolling(14).mean() / tr_roll
-        df['ADX_14']    = (df['ADX_plus'] - df['ADX_minus']).abs()
+        # ── Williams %R ───────────────────────────────────────────────────
+        out["willr"] = (-100 * (hh14 - c) / (hh14 - ll14).replace(0, np.nan)).fillna(-50)
 
-        # ── 16. Momentum / ROC ───────────────────────────────────────────
-        df['MOM_5']  = close.diff(5)
-        df['MOM_10'] = close.diff(10)
-        df['ROC_5']  = close.pct_change(5) * 100
-        df['ROC_10'] = close.pct_change(10) * 100
+        # ── CCI ───────────────────────────────────────────────────────────
+        tp    = (h + lo + c) / 3
+        tp_ma = tp.rolling(20).mean()
+        tp_md = tp.rolling(20).apply(lambda x: np.mean(np.abs(x - x.mean())), raw=True)
+        out["cci"] = ((tp - tp_ma) / (0.015 * tp_md.replace(0, np.nan))).clip(-300, 300).fillna(0)
 
-        # ── 17. CCI (Commodity Channel Index) ────────────────────────────
-        typical = (high + low + close) / 3
-        cci_ma  = typical.rolling(20).mean()
-        cci_md  = typical.rolling(20).apply(lambda x: np.mean(np.abs(x - x.mean())), raw=True)
-        df['CCI_20'] = ((typical - cci_ma) / (0.015 * cci_md.replace(0, np.nan))).fillna(0)
+        # ── ADX ───────────────────────────────────────────────────────────
+        pdm  = h.diff().clip(lower=0)
+        mdm  = (-lo.diff()).clip(lower=0)
+        tr14 = tr.rolling(14).mean().replace(0, np.nan)
+        out["adx_plus"]  = (100 * pdm.rolling(14).mean() / tr14).fillna(0)
+        out["adx_minus"] = (100 * mdm.rolling(14).mean() / tr14).fillna(0)
+        out["adx_diff"]  = out["adx_plus"] - out["adx_minus"]
 
-        # ── 18. Williams %R ──────────────────────────────────────────────
-        hh14w = high.rolling(14).max()
-        ll14w = low.rolling(14).min()
-        dw    = (hh14w - ll14w).replace(0, np.nan)
-        df['WILLIAMS_R'] = (-100 * (hh14w - close) / dw).fillna(-50)
+        # ── ROC ───────────────────────────────────────────────────────────
+        for w in [3, 5, 10, 20]:
+            out[f"roc_{w}"] = c.pct_change(w) * 100
 
-        # ── 19. Hacim özellikleri ────────────────────────────────────────
-        df['volume_sma_14']   = volume.rolling(14).mean()
-        df['volume_ratio']    = volume / df['volume_sma_14'].replace(0, np.nan)
-        df['price_x_volume']  = (close * volume) / 1e9   # normalise
+        # ── Hacim (göreceli) ──────────────────────────────────────────────
+        vsma14 = v.rolling(14).mean()
+        vsma50 = v.rolling(50).mean()
+        out["v_ratio"]  = (v / vsma14.replace(0, np.nan)).clip(0, 10)
+        out["v_trend"]  = (vsma14 / vsma50.replace(0, np.nan)).clip(0, 5)
+        # Fiyat-hacim baskısı (OBV türevi)
+        out["pv_corr"]  = (lr * (v / vsma14.replace(0, np.nan))).clip(-5, 5)
 
-        # ── 20. Fiyat pattern ────────────────────────────────────────────
-        df['high_low_pct'] = (high - low) / close.replace(0, np.nan)
-        df['close_open']   = (close - df['open']) / close.replace(0, np.nan)
+        # ── Fiyat pattern (candle) ────────────────────────────────────────
+        out["hl_pct"]     = (h - lo) / c.replace(0, np.nan)
+        out["open_close"] = (c - op) / c.replace(0, np.nan)
+        out["upper_wick"] = (h - c.clip(upper=h)) / c.replace(0, np.nan)
+        out["lower_wick"] = (c.clip(lower=lo) - lo) / c.replace(0, np.nan)
 
-        # ── NaN temizliği ─────────────────────────────────────────────────
-        df.dropna(inplace=True)
+        # ── 52 haftalık uzaklık ───────────────────────────────────────────
+        out["dist_52w_high"] = (c - c.rolling(252).max()) / c.replace(0, np.nan)
+        out["dist_52w_low"]  = (c - c.rolling(252).min()) / c.replace(0, np.nan)
 
-        if df.empty:
-            print(f"[data_manager] {ticker}: dropna sonrası boş.")
+        # ── SMA eğimi ─────────────────────────────────────────────────────
+        sma50 = c.rolling(50).mean()
+        out["sma50_slope"] = sma50.diff(5) / sma50.shift(5).replace(0, np.nan)
+        out["sma20_slope"] = sma20.diff(5) / sma20.shift(5).replace(0, np.nan)
+
+        # ── HEDEF ─────────────────────────────────────────────────────────
+        out["target_lr"] = lr.shift(-1)   # sonraki günün log-return'ü
+
+        # ── Raw fiyat (chart için, feature DEĞİL) ─────────────────────────
+        out["Close"]  = c
+        out["High"]   = h
+        out["Low"]    = lo
+        out["Volume"] = v
+
+        # NaN temizliği
+        out.dropna(inplace=True)
+
+        if out.empty or len(out) < 60:
+            print(f"[data] {ticker}: dropna sonrası yetersiz ({len(out)}).")
             return None
 
-        # ── Sütun adlarını kısmen büyük harfe geri çevir ─────────────────
-        df.rename(columns={
-            'open':   'Open',
-            'high':   'High',
-            'low':    'Low',
-            'close':  'Close',
-            'volume': 'Volume',
-        }, inplace=True)
-
-        print(f"[data_manager] {ticker}: {len(df)} satır, {len(df.columns)} feature hazır.")
-        return df
+        print(f"[data] {ticker}: {len(out)} satır, {len(out.columns)} kolon.")
+        return out
 
     except Exception as e:
         import traceback
-        print(f"[data_manager] {ticker} HATA: {e}")
+        print(f"[data] {ticker} HATA: {e}")
         traceback.print_exc()
         return None
+
+
+# Feature grupları (UI için — Close/High/Low/Volume/target_lr hariç)
+FEATURE_COLS = [
+    # returns
+    "lr_1","lr_2","lr_3","lr_5","lr_10","lr_20",
+    # rsi
+    "rsi_7","rsi_14","rsi_21","rsi_diff_7_14","rsi_mom",
+    # macd
+    "macd","macd_sig","macd_hist","macd_mom",
+    # bollinger
+    "bb_pct","bb_width",
+    # sma/ema
+    "dist_sma5","dist_sma10","dist_sma20","dist_sma50","dist_sma100",
+    "dist_ema9","dist_ema21","dist_ema50",
+    # volatility
+    "vol_5d","vol_10d","vol_20d","rvol_20","vol_ratio",
+    # atr
+    "atr_pct","atr_trend",
+    # stoch
+    "stoch_k","stoch_d","stoch_diff",
+    # willr
+    "willr",
+    # cci
+    "cci",
+    # adx
+    "adx_plus","adx_minus","adx_diff",
+    # roc
+    "roc_3","roc_5","roc_10","roc_20",
+    # volume
+    "v_ratio","v_trend","pv_corr",
+    # pattern
+    "hl_pct","open_close","upper_wick","lower_wick",
+    # distance
+    "dist_52w_high","dist_52w_low",
+    # slope
+    "sma50_slope","sma20_slope",
+]
+
+FEATURE_GROUPS = {
+    "Returns":    ["lr_1","lr_2","lr_3","lr_5","lr_10","lr_20"],
+    "RSI":        ["rsi_7","rsi_14","rsi_21","rsi_diff_7_14","rsi_mom"],
+    "MACD":       ["macd","macd_sig","macd_hist","macd_mom"],
+    "Bollinger":  ["bb_pct","bb_width"],
+    "SMA":        ["dist_sma5","dist_sma10","dist_sma20","dist_sma50","dist_sma100",
+                   "dist_ema9","dist_ema21","dist_ema50"],
+    "Volatility": ["vol_5d","vol_10d","vol_20d","rvol_20","vol_ratio"],
+    "ATR":        ["atr_pct","atr_trend"],
+    "Stoch":      ["stoch_k","stoch_d","stoch_diff"],
+    "Williams":   ["willr"],
+    "CCI":        ["cci"],
+    "ADX":        ["adx_plus","adx_minus","adx_diff"],
+    "Momentum":   ["roc_3","roc_5","roc_10","roc_20"],
+    "Volume":     ["v_ratio","v_trend","pv_corr"],
+    "Pattern":    ["hl_pct","open_close","upper_wick","lower_wick"],
+    "Distance":   ["dist_52w_high","dist_52w_low"],
+    "Trend":      ["sma50_slope","sma20_slope"],
+}
+
+DEFAULT_GROUPS = [
+    "Returns","RSI","MACD","Bollinger","SMA","Volatility","ATR","Momentum"
+]
