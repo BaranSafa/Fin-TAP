@@ -1,18 +1,17 @@
-Flask
-Flask-SQLAlchemy
-Flask-Login
-Flask-Cors
-email-validator
+flask
+flask-login
+flask-sqlalchemy
+flask-cors
+werkzeug
 gunicorn
 psycopg2-binary
-numpy
+# yfinance 0.2.50+ "Impersonating chrome136" hatası veriyor
+# 0.2.44 stabil, bu hata yok
+yfinance==0.2.44
 pandas
-yfinance
-beautifulsoup4
-requests
+numpy
 scikit-learn
 xgboost
 lightgbm
-tensorflow-cpu
-keras
-h5py
+requests
+requests-cache
