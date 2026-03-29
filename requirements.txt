@@ -5,8 +5,6 @@ flask-cors
 werkzeug
 gunicorn
 psycopg2-binary
-# yfinance 0.2.50+ "Impersonating chrome136" hatası veriyor
-# 0.2.44 stabil, bu hata yok
 yfinance==0.2.44
 pandas
 numpy
