@@ -5,11 +5,11 @@ flask-cors
 werkzeug
 gunicorn
 psycopg2-binary
-yfinance==0.2.44
+yfinance>=0.2.50
+curl_cffi==0.7.4
 pandas
 numpy
 scikit-learn
 xgboost
 lightgbm
 requests
-requests-cache

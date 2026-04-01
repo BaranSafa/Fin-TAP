@@ -76,10 +76,23 @@ def _ewm(s: pd.Series, span: int) -> pd.Series:
 
 # ── 3 KATMANLI İNDİRME ───────────────────────────────────────────────────────
 def _yf(ticker: str, start: str) -> Optional[pd.DataFrame]:
+    """
+    curl_cffi ile yfinance — chrome impersonation hatası yok.
+    curl_cffi==0.7.4 + yfinance>=0.2.50 gerekli (requirements.txt).
+    """
     try:
-        sess = requests.Session(); sess.headers.update(_HDRS)
+        # curl_cffi session — Yahoo Finance'ın bot engelini geçer
+        try:
+            from curl_cffi import requests as cffi_requests
+            sess = cffi_requests.Session(impersonate="chrome")
+        except Exception:
+            # curl_cffi yoksa normal requests session dene
+            sess = requests.Session()
+            sess.headers.update(_HDRS)
+
         t  = yf.Ticker(ticker, session=sess)
         df = t.history(start=start, auto_adjust=True)
+
         if df is not None and not df.empty:
             df.columns = df.columns.str.lower()
             print(f"[data] {ticker}: yfinance OK ({len(df)}r, son:{df.index[-1].date()})")
