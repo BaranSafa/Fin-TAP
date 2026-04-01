@@ -1,27 +1,35 @@
 import os
 import joblib
 
-# Listede görünmesini istediğiniz hisseler
-TICKERS_TO_TRAIN = ['AAPL', 'GOOG', 'MSFT', 'AMZN', 'TSLA', 'AMD', 'CSCO', 'ADBE', 'PYPL', 'NVDA', 'NFLX', 'INTC', 'ORCL', 'IBM', 'CRM', 'QCOM', 'TXN', 'AVGO', 'MU', 'LRCX', 'NOW', 'ZM', 'DOCU', 'SNOW', 'UBER', 'LYFT', 'SPOT', 'TWTR', 'SQ', 'SHOP', 'ETSY']
+# Hisse senetleri
+STOCKS = [
+    'AAPL', 'GOOG', 'MSFT', 'AMZN', 'TSLA', 'AMD', 'CSCO', 'ADBE',
+    'PYPL', 'NVDA', 'NFLX', 'INTC', 'ORCL', 'IBM', 'CRM', 'QCOM',
+    'TXN', 'AVGO', 'MU', 'LRCX', 'NOW', 'ZM', 'DOCU', 'SNOW',
+    'UBER', 'LYFT', 'SPOT', 'SQ', 'SHOP', 'ETSY',
+]
+
+# Kripto paralar — yfinance BTC-USD formatını destekler
+CRYPTO = [
+    'BTC-USD', 'ETH-USD', 'BNB-USD', 'SOL-USD',
+    'ADA-USD', 'XRP-USD', 'DOGE-USD', 'AVAX-USD',
+]
+
+TICKERS_TO_TRAIN = STOCKS + CRYPTO
 
 if __name__ == "__main__":
-    # Models klasörünü oluştur
     if not os.path.exists("models"):
         os.makedirs("models")
-    
-    print("--- Sistem Başlatılıyor ---")
-    
+
+    print("--- Fin-TAP Sistem Başlatılıyor ---")
+
     for ticker in TICKERS_TO_TRAIN:
-        # Burada veri çekme veya eğitim YAPMIYORUZ.
-        # Sadece arayüzde görünebilmesi için boş bir dosya oluşturuyoruz.
-        file_path = os.path.join("models", f"{ticker}_scaler.joblib")
-        
-        # Eğer dosya yoksa oluştur (varsa elleme)
+        file_path = os.path.join("models", f"{ticker.replace('-','_')}_scaler.joblib")
         if not os.path.exists(file_path):
             joblib.dump("dummy_scaler", file_path)
-            print(f"'{ticker}' sisteme eklendi.")
+            print(f"  ✓ '{ticker}' sisteme eklendi.")
         else:
-            print(f"'{ticker}' zaten mevcut.")
-            
-    print("--- Kurulum Tamamlandı ---")
+            print(f"  · '{ticker}' zaten mevcut.")
+
+    print(f"\n--- Kurulum Tamamlandı ({len(TICKERS_TO_TRAIN)} araç) ---")
     print("Şimdi 'python run.py' komutunu çalıştırabilirsiniz.")

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Compare Stocks — Fin-TAP{% endblock %}
-{% block header_title %}Stock Comparison Tool{% endblock %}
-{% block header_sub %}AI-POWERED SIDE-BY-SIDE ANALYSIS{% endblock %}
+{% block header_title %}Asset Comparison Tool{% endblock %}
+{% block header_sub %}AI-POWERED SIDE-BY-SIDE ANALYSIS · STOCKS & CRYPTO{% endblock %}
 
 {% block content %}
 <style>
@@ -117,16 +117,26 @@
 
     <div class="vs-grid">
         <div>
-            <label class="form-label" style="color:var(--accent);">Stock #1</label>
+            <label class="form-label" style="color:var(--accent);">Asset #1</label>
             <select id="t1" class="form-select" style="border-color: rgba(0,212,255,0.3);">
-                {% for s in stocks %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+                <optgroup label="── STOCKS ──">
+                {% for s in stocks %}{% if '-USD' not in s %}<option value="{{ s }}">{{ s }}</option>{% endif %}{% endfor %}
+                </optgroup>
+                <optgroup label="── CRYPTO ──">
+                {% for s in stocks %}{% if '-USD' in s %}<option value="{{ s }}">{{ s }}</option>{% endif %}{% endfor %}
+                </optgroup>
             </select>
         </div>
         <div class="vs-center">VS</div>
         <div>
-            <label class="form-label" style="color:var(--purple);">Stock #2</label>
+            <label class="form-label" style="color:var(--purple);">Asset #2</label>
             <select id="t2" class="form-select" style="border-color: rgba(124,92,252,0.3);">
-                {% for s in stocks %}<option value="{{ s }}" {% if loop.index == 2 %}selected{% endif %}>{{ s }}</option>{% endfor %}
+                <optgroup label="── STOCKS ──">
+                {% for s in stocks %}{% if '-USD' not in s %}<option value="{{ s }}" {% if loop.index == 2 %}selected{% endif %}>{{ s }}</option>{% endif %}{% endfor %}
+                </optgroup>
+                <optgroup label="── CRYPTO ──">
+                {% for s in stocks %}{% if '-USD' in s %}<option value="{{ s }}">{{ s }}</option>{% endif %}{% endfor %}
+                </optgroup>
             </select>
         </div>
     </div>

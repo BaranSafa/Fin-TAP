@@ -88,14 +88,25 @@
     <!-- LEFT: Config Panel -->
     <div style="display:flex; flex-direction:column; gap:12px;">
 
-        <!-- Stock selector -->
+        <!-- Stock/Crypto selector -->
         <div class="card card-pad">
             <div class="sec-label">// SELECT INSTRUMENT</div>
-            <label class="form-label">Stock Ticker</label>
+            <label class="form-label">Stock or Crypto</label>
             <select id="ticker-input" class="form-select">
+                <optgroup label="── STOCKS ──">
                 {% for t in trained_stocks %}
+                {% if '-USD' not in t %}
                 <option value="{{ t }}" {% if t == ticker_from_url %}selected{% endif %}>{{ t }}</option>
+                {% endif %}
                 {% endfor %}
+                </optgroup>
+                <optgroup label="── CRYPTO ──">
+                {% for t in trained_stocks %}
+                {% if '-USD' in t %}
+                <option value="{{ t }}" {% if t == ticker_from_url %}selected{% endif %}>{{ t }}</option>
+                {% endif %}
+                {% endfor %}
+                </optgroup>
             </select>
         </div>
 
