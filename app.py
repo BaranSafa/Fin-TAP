@@ -14,6 +14,7 @@ Düzeltilen 500 hata nedenleri:
 from __future__ import annotations
 
 import os, sys, traceback
+from sqlalchemy import inspect as db_inspect
 from flask import (Flask, render_template, redirect, url_for,
                    flash, request, jsonify)
 from flask_login import (LoginManager, login_user, login_required,
@@ -113,6 +114,107 @@ def get_wallet():
 def ping():
     """UptimeRobot bu endpoint'i her 5 dakika ping atar → Render uyumaz."""
     return "OK", 200
+
+
+# ── Cache & veri güncelleme endpoint'leri ─────────────────────────────────────
+
+@app.route("/api/cache/status")
+@login_required
+def api_cache_status():
+    """Cache durumunu göster — hangi ticker ne zaman çekildi."""
+    try:
+        from backend.data_manager import cache_status
+        status = cache_status()
+        return jsonify({
+            "cache": status,
+            "total_cached": len(status),
+            "market_open": _market_open_check(),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/cache/clear")
+@login_required
+def api_cache_clear():
+    """Belirli bir ticker'ın cache'ini temizle. ?ticker=AAPL"""
+    ticker = request.args.get("ticker")
+    try:
+        from backend.data_manager import cache_clear
+        cache_clear(ticker)
+        return jsonify({"status": "ok", "cleared": ticker or "all"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/refresh")
+def api_refresh():
+    """
+    Cron job bu endpoint'i çağırır → tüm tickerları günceller.
+    Harici cron (cron-job.org): her gün 18:00 UTC'de çağır.
+    Herhangi bir auth gerektirmez (cron servis header ekleyemez).
+    Güvenlik: sadece belirli bir CRON_SECRET ile çalışır.
+    """
+    secret = request.args.get("secret", "")
+    expected = os.environ.get("CRON_SECRET", "")
+
+    if expected and secret != expected:
+        return jsonify({"error": "unauthorized"}), 401
+
+    results = {"refreshed": [], "failed": [], "skipped": []}
+
+    try:
+        from backend.data_manager import get_processed_data, cache_clear
+        # Önce cache'i temizle → force fresh
+        cache_clear()
+
+        # Sadece ilk 10 ticker'ı yenile (RAM koruması)
+        for ticker in TICKERS_TO_TRAIN[:10]:
+            try:
+                df = get_processed_data(ticker, force_refresh=True)
+                if df is not None:
+                    results["refreshed"].append(ticker)
+                    print(f"[refresh] {ticker}: OK, son: {df.index[-1].date()}")
+                else:
+                    results["failed"].append(ticker)
+            except Exception as e:
+                print(f"[refresh] {ticker}: HATA: {e}")
+                results["failed"].append(ticker)
+
+        results["skipped"] = TICKERS_TO_TRAIN[10:]
+        print(f"[refresh] Tamamlandı: {len(results['refreshed'])} OK, "
+              f"{len(results['failed'])} başarısız")
+
+    except Exception as e:
+        print(f"[refresh] HATA: {e}"); traceback.print_exc()
+        results["error"] = str(e)
+
+    return jsonify(results)
+
+
+def _market_open_check():
+    from datetime import datetime
+    now = datetime.utcnow()
+    if now.weekday() >= 5:
+        return False
+    return 14 <= now.hour < 21
+
+
+@app.route("/db-test")
+def db_test():
+    """DB bağlantısını test et — sorun teşhisi için."""
+    info = {
+        "db_url_set":    bool(os.environ.get("DATABASE_URL")),
+        "db_url_prefix": (os.environ.get("DATABASE_URL") or "")[:30] + "...",
+        "sqlalchemy_uri": app.config["SQLALCHEMY_DATABASE_URI"][:40] + "...",
+    }
+    try:
+        db.session.execute(db.text("SELECT 1"))
+        info["connection"] = "OK ✓"
+        info["tables"]     = db_inspect(db.engine).get_table_names()
+    except Exception as e:
+        info["connection"] = f"HATA: {str(e)[:200]}"
+    return jsonify(info), 200
 
 
 @app.route("/db-kur")
