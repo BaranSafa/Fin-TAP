@@ -548,10 +548,10 @@
         <div class="topbar-right">
             <div class="token-chip">
                 <div class="token-dot"></div>
-                <span class="token-count">{{ balance }}</span>
+                <span class="token-count" id="token-balance">{{ balance }}</span>
                 <span class="token-label">TOKENS</span>
                 {% if balance <= 2 %}
-                <a href="/prices" class="token-buy">+ BUY</a>
+                <a href="/prices" class="token-buy" id="token-buy-link">+ BUY</a>
                 {% endif %}
             </div>
             <div class="user-chip">

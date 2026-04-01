@@ -28,11 +28,20 @@ _MEM_CACHE: dict = {}   # {ticker: {"df": DataFrame, "at": datetime}}
 
 
 def _market_open() -> bool:
-    """NYSE/NASDAQ açık mı? (UTC tabanlı yaklaşık kontrol)"""
-    now = datetime.utcnow()
-    if now.weekday() >= 5:          # hafta sonu
-        return False
-    return 14 <= now.hour < 21      # 09:30–16:00 EST ≈ 14:30–21:00 UTC
+    """NYSE/NASDAQ açık mı? (America/New_York timezone — DST dahil doğru hesaplama)"""
+    try:
+        from zoneinfo import ZoneInfo
+        now_et = datetime.now(tz=ZoneInfo("America/New_York"))
+        if now_et.weekday() >= 5:       # hafta sonu
+            return False
+        t = now_et.hour * 60 + now_et.minute
+        return 570 <= t < 960           # 09:30 = 570 dk, 16:00 = 960 dk
+    except Exception:
+        # zoneinfo yoksa (Python < 3.9) UTC fallback
+        now = datetime.utcnow()
+        if now.weekday() >= 5:
+            return False
+        return 14 <= now.hour < 21      # 09:30–16:00 EST ≈ 14:30–21:00 UTC
 
 
 def _ttl() -> int:

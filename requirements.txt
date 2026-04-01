@@ -2,6 +2,8 @@ flask
 flask-login
 flask-sqlalchemy
 flask-cors
+flask-limiter
+flask-wtf
 werkzeug
 gunicorn
 psycopg2-binary

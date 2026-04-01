@@ -47,13 +47,22 @@ document.addEventListener('DOMContentLoaded', () => {
                     resultCard.classList.remove('hidden');
                     predictionText.innerText = `$${data.prediction}`;
                     modelNameText.innerText = model;
-                    
+
                     // Grafiği Çiz
                     drawChart(data.chart_data);
-                    
-                    // Bakiyeyi güncelle (Navbar'daki)
-                    // Sayfayı yenilemeden bakiyeyi düşürmek istersen buraya kod eklenebilir
-                    // Şimdilik basit tutalım.
+
+                    // Bakiyeyi anlık güncelle (sayfa yenilemeye gerek yok)
+                    if (data.balance !== undefined) {
+                        const tokenCount = document.querySelector('.token-count');
+                        if (tokenCount) {
+                            tokenCount.textContent = data.balance;
+                        }
+                        // Bakiye 0 veya az ise uyarı bandını göster
+                        const zeroBanner = document.getElementById('zero-token-banner');
+                        const lowBanner  = document.getElementById('low-token-banner');
+                        if (zeroBanner) zeroBanner.style.display = data.balance === 0 ? 'flex' : 'none';
+                        if (lowBanner)  lowBanner.style.display  = (data.balance > 0 && data.balance <= 2) ? 'flex' : 'none';
+                    }
                 }
 
             } catch (err) {

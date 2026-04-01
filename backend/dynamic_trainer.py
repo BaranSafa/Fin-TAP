@@ -1,11 +1,19 @@
 """
 dynamic_trainer.py  —  Fin-TAP Backend
-Render.com free tier optimize + flat line fix.
+
+V0.7 Düzeltmeleri:
+  1. Feature seçim bug'ı düzeltildi: DEFAULT_GROUPS artık her zaman eklenmez,
+     sadece kullanıcı seçimi (veya varsayılan) kullanılır.
+  2. Rastgele fallback düzeltildi: tahmin hatasında random gürültü yerine
+     son bilinen fiyat kullanılır.
+  3. Clip limiti 0.10 → 0.15 (BTC gibi volatil varlıklar için daha gerçekçi).
+  4. Model cache eklendi: aynı ticker+model+feature kombinasyonu 30 dk cache'lenir.
 """
 from __future__ import annotations
 
 import warnings; warnings.filterwarnings("ignore")
 import traceback
+import time
 import numpy as np
 import pandas as pd
 from datetime import timedelta
@@ -39,6 +47,33 @@ try:
     from .data_manager import get_processed_data, FEATURE_GROUPS, DEFAULT_GROUPS
 except ImportError:
     from data_manager import get_processed_data, FEATURE_GROUPS, DEFAULT_GROUPS
+
+
+# ──────────────────────────────────────────────────────────────
+#  MODEL CACHE — aynı parametrelerle tekrar sorgu gelirse hız
+# ──────────────────────────────────────────────────────────────
+_MODEL_CACHE: dict = {}   # {cache_key: {"model": ..., "sc": ..., "feat_set": ..., "at": float}}
+_MODEL_CACHE_TTL = 1800   # 30 dakika
+
+
+def _cache_key(ticker: str, model_type: str, groups: list) -> str:
+    return f"{ticker}|{model_type}|{'_'.join(sorted(groups))}"
+
+
+def _get_cached_model(key: str):
+    entry = _MODEL_CACHE.get(key)
+    if entry and (time.time() - entry["at"]) < _MODEL_CACHE_TTL:
+        print(f"[trainer] Cache HIT: {key}")
+        return entry
+    return None
+
+
+def _set_cached_model(key: str, model, sc, feat_set: list):
+    _MODEL_CACHE[key] = {"model": model, "sc": sc, "feat_set": feat_set, "at": time.time()}
+    # Cache boyutunu sınırla (max 20 model)
+    if len(_MODEL_CACHE) > 20:
+        oldest = min(_MODEL_CACHE, key=lambda k: _MODEL_CACHE[k]["at"])
+        del _MODEL_CACHE[oldest]
 
 
 # ──────────────────────────────────────────────────────────────
@@ -211,13 +246,9 @@ def train_and_predict_dynamic(
         print(f"[trainer] {ticker}: veri alınamadı")
         return None, None
 
-    # 2. Feature seçimi
-    groups = selected_feature_groups if selected_feature_groups else DEFAULT_GROUPS
-    feat_set: list = []
-    for g in DEFAULT_GROUPS:
-        for col in FEATURE_GROUPS.get(g, []):
-            if col in df.columns and col not in feat_set:
-                feat_set.append(col)
+    # 2. Feature seçimi — SADECE kullanıcı seçimi (veya varsayılan), her ikisi birden değil
+    groups   = selected_feature_groups if selected_feature_groups else DEFAULT_GROUPS
+    feat_set = []
     for g in groups:
         for col in FEATURE_GROUPS.get(g, []):
             if col in df.columns and col not in feat_set:
@@ -226,9 +257,15 @@ def train_and_predict_dynamic(
 
     print(f"[trainer] {ticker} | {model_type} | {len(feat_set)} feat | {len(df)} satır")
 
-    if len(feat_set) < 5:
-        print("[trainer] yetersiz feature")
-        return None, None
+    if len(feat_set) < 3:
+        print("[trainer] yetersiz feature — DEFAULT_GROUPS kullanılıyor")
+        feat_set = []
+        for g in DEFAULT_GROUPS:
+            for col in FEATURE_GROUPS.get(g, []):
+                if col in df.columns and col not in feat_set:
+                    feat_set.append(col)
+        if len(feat_set) < 3:
+            return None, None
 
     # 3. X, y
     X_df   = df[feat_set].copy()
@@ -244,108 +281,126 @@ def train_and_predict_dynamic(
 
     X    = X_df.values.astype(float)
     y    = y_s.values.astype(float)
-    sc   = RobustScaler()
-    X_sc = sc.fit_transform(X)
 
     # 4. Split
-    split    = int(len(X_sc) * 0.90)
-    X_tr, y_tr = X_sc[:split],  y[:split]
-    X_te, y_te = X_sc[split:],  y[split:]
+    split      = int(len(X) * 0.90)
     close_te   = closes.values[split:]
 
-    # 5. Eğit — Render: n_jobs=1, küçük n_estimators
-    model   = None
-    is_lstm = False
-    try:
-        if model_type == "LINEAR":
-            model = Ridge(alpha=2.0)
-            model.fit(X_tr, y_tr)
+    # 5. Model cache kontrolü
+    c_key    = _cache_key(ticker, model_type, groups)
+    cached   = _get_cached_model(c_key)
+    is_lstm  = model_type == "LSTM"
 
-        elif model_type == "RANDOM_FOREST":
-            model = RandomForestRegressor(
-                n_estimators=100, max_depth=8, min_samples_leaf=5,
-                n_jobs=1, random_state=42
-            )
-            model.fit(X_tr, y_tr)
+    if cached:
+        model    = cached["model"]
+        sc       = cached["sc"]
+        feat_set = cached["feat_set"]
+        X_sc     = sc.transform(X)
+        X_tr, y_tr = X_sc[:split], y[:split]
+        X_te, y_te = X_sc[split:], y[split:]
+    else:
+        sc       = RobustScaler()
+        X_sc     = sc.fit_transform(X)
+        X_tr, y_tr = X_sc[:split], y[:split]
+        X_te, y_te = X_sc[split:], y[split:]
+        model    = None
 
-        elif model_type == "EXTRA_TREES":
-            model = ExtraTreesRegressor(
-                n_estimators=100, max_depth=8, min_samples_leaf=5,
-                n_jobs=1, random_state=42
-            )
-            model.fit(X_tr, y_tr)
+        # 6. Eğit
+        try:
+            if model_type == "LINEAR":
+                model = Ridge(alpha=2.0)
+                model.fit(X_tr, y_tr)
 
-        elif model_type == "GRADIENT_BOOST":
-            model = GradientBoostingRegressor(
-                n_estimators=150, learning_rate=0.05, max_depth=4,
-                subsample=0.8, min_samples_leaf=5, random_state=42
-            )
-            model.fit(X_tr, y_tr)
+            elif model_type == "RANDOM_FOREST":
+                model = RandomForestRegressor(
+                    n_estimators=100, max_depth=8, min_samples_leaf=5,
+                    n_jobs=1, random_state=42
+                )
+                model.fit(X_tr, y_tr)
 
-        elif model_type == "XGBOOST":
-            if not HAS_XGB:
-                raise ImportError("xgboost kurulu değil — requirements.txt'e ekle")
-            model = xgb.XGBRegressor(
-                n_estimators=200, learning_rate=0.05, max_depth=5,
-                subsample=0.8, colsample_bytree=0.8, reg_lambda=2.0,
-                random_state=42, verbosity=0, n_jobs=1
-            )
-            model.fit(X_tr, y_tr, eval_set=[(X_te, y_te)], verbose=False)
+            elif model_type == "EXTRA_TREES":
+                model = ExtraTreesRegressor(
+                    n_estimators=100, max_depth=8, min_samples_leaf=5,
+                    n_jobs=1, random_state=42
+                )
+                model.fit(X_tr, y_tr)
 
-        elif model_type == "LIGHTGBM":
-            if not HAS_LGB:
-                raise ImportError("lightgbm kurulu değil — requirements.txt'e ekle")
-            model = lgb.LGBMRegressor(
-                n_estimators=200, learning_rate=0.05, num_leaves=31,
-                min_child_samples=20, reg_lambda=2.0,
-                random_state=42, verbose=-1, n_jobs=1
-            )
-            model.fit(X_tr, y_tr, eval_set=[(X_te, y_te)])
+            elif model_type == "GRADIENT_BOOST":
+                model = GradientBoostingRegressor(
+                    n_estimators=150, learning_rate=0.05, max_depth=4,
+                    subsample=0.8, min_samples_leaf=5, random_state=42
+                )
+                model.fit(X_tr, y_tr)
 
-        elif model_type == "LSTM":
-            if not HAS_TF:
-                raise ImportError("tensorflow kurulu değil — Render free 512MB'a sığmayabilir")
-            is_lstm = True
-            seq_len = 15
-            nf      = X_sc.shape[1]
+            elif model_type == "XGBOOST":
+                if not HAS_XGB:
+                    raise ImportError("xgboost kurulu değil — requirements.txt'e ekle")
+                model = xgb.XGBRegressor(
+                    n_estimators=200, learning_rate=0.05, max_depth=5,
+                    subsample=0.8, colsample_bytree=0.8, reg_lambda=2.0,
+                    random_state=42, verbosity=0, n_jobs=1
+                )
+                model.fit(X_tr, y_tr, eval_set=[(X_te, y_te)], verbose=False)
 
-            def mk_seq(Xd, yd, seq):
-                Xs, ys = [], []
-                for i in range(seq, len(Xd)):
-                    Xs.append(Xd[i-seq:i]); ys.append(yd[i])
-                return np.array(Xs), np.array(ys)
+            elif model_type == "LIGHTGBM":
+                if not HAS_LGB:
+                    raise ImportError("lightgbm kurulu değil — requirements.txt'e ekle")
+                model = lgb.LGBMRegressor(
+                    n_estimators=200, learning_rate=0.05, num_leaves=31,
+                    min_child_samples=20, reg_lambda=2.0,
+                    random_state=42, verbose=-1, n_jobs=1
+                )
+                model.fit(X_tr, y_tr, eval_set=[(X_te, y_te)])
 
-            Xs, ys = mk_seq(X_sc, y, seq_len)
-            sp2     = int(len(Xs) * 0.90)
-            model = Sequential([
-                Input(shape=(seq_len, nf)),
-                LSTM(64, return_sequences=True),
-                Dropout(0.2),
-                LSTM(32),
-                Dense(1),
-            ])
-            model.compile(optimizer="adam", loss="huber")
-            model.fit(
-                Xs[:sp2], ys[:sp2],
-                validation_data=(Xs[sp2:], ys[sp2:]),
-                epochs=30, batch_size=32,
-                callbacks=[EarlyStopping(patience=5, restore_best_weights=True)],
-                verbose=0,
-            )
+            elif model_type == "LSTM":
+                if not HAS_TF:
+                    raise ImportError("tensorflow kurulu değil — Render free 512MB'a sığmayabilir")
+                is_lstm = True
+                seq_len = 15
+                nf      = X_sc.shape[1]
 
-        else:
-            print(f"[trainer] bilinmeyen model: {model_type}")
+                def mk_seq(Xd, yd, seq):
+                    Xs, ys = [], []
+                    for i in range(seq, len(Xd)):
+                        Xs.append(Xd[i-seq:i]); ys.append(yd[i])
+                    return np.array(Xs), np.array(ys)
+
+                Xs, ys = mk_seq(X_sc, y, seq_len)
+                sp2     = int(len(Xs) * 0.90)
+                model = Sequential([
+                    Input(shape=(seq_len, nf)),
+                    LSTM(64, return_sequences=True),
+                    Dropout(0.2),
+                    LSTM(32),
+                    Dense(1),
+                ])
+                model.compile(optimizer="adam", loss="huber")
+                model.fit(
+                    Xs[:sp2], ys[:sp2],
+                    validation_data=(Xs[sp2:], ys[sp2:]),
+                    epochs=30, batch_size=32,
+                    callbacks=[EarlyStopping(patience=5, restore_best_weights=True)],
+                    verbose=0,
+                )
+
+            else:
+                print(f"[trainer] bilinmeyen model: {model_type}")
+                return None, None
+
+        except Exception as e:
+            print(f"[trainer] EĞİTİM HATASI ({model_type}): {e}")
+            traceback.print_exc()
             return None, None
 
-    except Exception as e:
-        print(f"[trainer] EĞİTİM HATASI ({model_type}): {e}")
-        traceback.print_exc()
-        return None, None
+        # Modeli cache'e kaydet (LSTM hariç — çok büyük)
+        if not is_lstm:
+            _set_cached_model(c_key, model, sc, feat_set)
 
-    # 6. Backtest — log-return → fiyata çevir (flat line yok!)
+    # 7. Backtest
     try:
         if is_lstm:
-            Xs_all, _ = [], []
+            seq_len = 15
+            Xs_all = []
             for i in range(seq_len, len(X_sc)):
                 Xs_all.append(X_sc[i-seq_len:i])
             Xs_te_arr  = np.array(Xs_all[split-seq_len:])
@@ -368,7 +423,7 @@ def train_and_predict_dynamic(
         traceback.print_exc()
         bt_pred=[]; bt_actual=[]; bt_dates=[]
 
-    # 7. Gelecek — lag-based rolling window (flat line yok!)
+    # 8. Gelecek tahmin — rolling window
     ph = list(df["Close"].values[-80:].astype(float))
     hh = list(df["High"].values[-80:].astype(float))
     lh = list(df["Low"].values[-80:].astype(float))
@@ -378,6 +433,7 @@ def train_and_predict_dynamic(
     future = []
 
     if is_lstm:
+        seq_len = 15
         seq_rows = []
         for i in range(seq_len):
             idx  = -(seq_len - i)
@@ -391,7 +447,7 @@ def train_and_predict_dynamic(
 
         for _ in range(14):
             inp   = seq_arr[-seq_len:][np.newaxis]
-            lr_p  = float(np.clip(model.predict(inp, verbose=0).flatten()[0], -0.10, 0.10))
+            lr_p  = float(np.clip(model.predict(inp, verbose=0).flatten()[0], -0.15, 0.15))
             nxt   = last * np.exp(lr_p)
             future.append(nxt)
             ph.append(nxt); hh.append(nxt*1.005); lh.append(nxt*0.995)
@@ -404,11 +460,12 @@ def train_and_predict_dynamic(
             try:
                 row  = _compute_row(ph, hh, lh, vh, feat_set)
                 rdf  = pd.DataFrame([row])[feat_set]
-                lr_p = float(np.clip(model.predict(sc.transform(rdf.values))[0], -0.10, 0.10))
+                lr_p = float(np.clip(model.predict(sc.transform(rdf.values))[0], -0.15, 0.15))
                 nxt  = last * np.exp(lr_p)
             except Exception as e:
                 print(f"[trainer] gelecek adım {step}: {e}")
-                nxt = last * (1 + np.random.normal(0, 0.004))
+                # Düzeltildi: rastgele gürültü yerine son fiyatı kullan
+                nxt = last
             future.append(nxt)
             ph.append(nxt); hh.append(nxt*1.005); lh.append(nxt*0.995)
             vh.append(float(np.mean(vh[-5:]))); last = nxt
@@ -417,7 +474,7 @@ def train_and_predict_dynamic(
         print("[trainer] gelecek tahmin üretilemedi")
         return None, None
 
-    # 8. Chart verisi
+    # 9. Chart verisi
     last_date    = df.index[-1]
     future_dates = [
         (last_date + timedelta(days=i)).strftime("%Y-%m-%d")

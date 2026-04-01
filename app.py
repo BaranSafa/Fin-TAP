@@ -1,33 +1,38 @@
 """
 app.py  —  Fin-TAP  (Render production-grade)
 
-Düzeltilen 500 hata nedenleri:
-  1. db.create_all() uygulama başlarken app context içinde çalışıyor
-  2. SQLAlchemy 2.0 uyumu: User.query.get() → db.session.get()
-  3. SQLite instance/ klasörü otomatik yaratılıyor
-  4. SECRET_KEY eksikse uyarı verir, yine de çalışır
-  5. pool_pre_ping + pool_recycle → DB bağlantısı kopunca yeniden bağlanır
-  6. /ping endpoint → UptimeRobot (uyku engelleme)
-  7. 404 ve 500 hata handler'ları eklendi
-  8. Tüm exception'lar Render loglarında görünür
+V0.7 Güncellemeleri:
+  1. Flask-Limiter: Rate limiting eklendi (DDoS koruması)
+  2. Flask-WTF: CSRF koruması form route'larına eklendi
+  3. Güvenli SECRET_KEY: Env var yoksa rastgele üretir
+  4. Email enumeration düzeltildi (generic hata mesajı)
+  5. /db-test ve /db-kur ADMIN_SECRET ile korundu
+  6. Ticker ve feature group input validation eklendi
+  7. Şifre güvenlik kontrolü backend'e taşındı (min 8 karakter)
+  8. Watchlist CRUD endpoint'leri eklendi
+  9. Tahmin doğruluk takibi endpoint'i eklendi
+  10. Token bakiyesi prediction response'da anlık döndürülüyor
 """
 from __future__ import annotations
 
-import os, sys, traceback
+import os, sys, traceback, secrets
 from sqlalchemy import inspect as db_inspect
 from flask import (Flask, render_template, redirect, url_for,
-                   flash, request, jsonify)
+                   flash, request, jsonify, session)
 from flask_login import (LoginManager, login_user, login_required,
                          logout_user, current_user)
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from flask_wtf.csrf import CSRFProtect, generate_csrf
 
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
 BACKEND_DIR = os.path.join(BASE_DIR, "backend")
 sys.path.insert(0, BACKEND_DIR)
 sys.path.insert(0, BASE_DIR)
 
-from models import db, User, Wallet, Transaction, Prediction
+from models import db, User, Wallet, Transaction, Prediction, Watchlist
 
 # ── Backend ────────────────────────────────────────────────────────────────
 try:
@@ -38,7 +43,7 @@ except ImportError:
 try:
     from backend.dynamic_trainer import train_and_predict_dynamic
     from backend.model_manager   import get_suggestion_metrics
-    from backend.data_manager    import get_processed_data
+    from backend.data_manager    import get_processed_data, FEATURE_GROUPS
     print("[app] Backend modülleri yüklendi OK")
 except ImportError as e:
     print(f"[app] Backend import hatası: {e}")
@@ -46,17 +51,28 @@ except ImportError as e:
     def train_and_predict_dynamic(*a, **kw): return None, None
     def get_suggestion_metrics(*a, **kw):    return None
     def get_processed_data(*a, **kw):        return None
+    FEATURE_GROUPS = {}
+
+# Geçerli ticker ve feature group listeleri (input validation için)
+VALID_TICKERS       = set(TICKERS_TO_TRAIN)
+VALID_FEATURE_GROUPS = set(FEATURE_GROUPS.keys()) if FEATURE_GROUPS else {
+    "Returns","RSI","MACD","Bollinger","SMA","EMA","Volatility",
+    "ATR","Stoch","Williams","CCI","ADX","Momentum","Volume","Pattern",
+    "Distance","Trend"
+}
 
 # ── Flask ──────────────────────────────────────────────────────────────────
 app = Flask(__name__,
             template_folder=os.path.join(BASE_DIR, "frontend", "templates"),
             static_folder=os.path.join(BASE_DIR, "frontend", "static"))
 
-app.config["SECRET_KEY"] = os.environ.get(
-    "SECRET_KEY", "fintap-fallback-key-set-env-var")
-
-if not os.environ.get("SECRET_KEY"):
-    print("[app] UYARI: SECRET_KEY env var eksik! Render > Environment'a ekle.")
+# SECRET_KEY: env var yoksa güvenli rastgele üret (her yeniden başlatmada session geçersiz olur)
+_secret = os.environ.get("SECRET_KEY")
+if not _secret:
+    _secret = secrets.token_hex(32)
+    print("[app] UYARI: SECRET_KEY env var eksik! Render > Environment'a ekle. "
+          "Geçici rastgele key üretildi (restart'ta session'lar sıfırlanır).")
+app.config["SECRET_KEY"] = _secret
 
 # ── DB ──────────────────────────────────────────────────────────────────────
 _db_url = os.environ.get("DATABASE_URL", "")
@@ -77,16 +93,31 @@ app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
     "pool_pre_ping": True,
     "pool_recycle":  280,
 }
+app.config["WTF_CSRF_TIME_LIMIT"] = 3600   # CSRF token 1 saat geçerli
 
-CORS(app)
+# ── CORS ──────────────────────────────────────────────────────────────────
+_allowed_origins = os.environ.get("ALLOWED_ORIGINS", "*")
+if _allowed_origins == "*":
+    print("[app] UYARI: CORS tüm origin'lere açık. Prod'da ALLOWED_ORIGINS env var'ını ayarla.")
+CORS(app, origins=_allowed_origins)
+
+# ── Extensions ────────────────────────────────────────────────────────────
 db.init_app(app)
+csrf = CSRFProtect(app)
+
+limiter = Limiter(
+    key_func=get_remote_address,
+    app=app,
+    default_limits=["300 per day", "60 per hour"],
+    storage_uri="memory://",
+)
 
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
 
 @login_manager.user_loader
 def load_user(uid):
-    return db.session.get(User, int(uid))   # SQLAlchemy 2.0 uyumlu
+    return db.session.get(User, int(uid))
 
 # DB tablolarını oluştur
 with app.app_context():
@@ -97,6 +128,13 @@ with app.app_context():
         print(f"[app] db.create_all hatası: {e}")
 
 
+# ── CSRF token'ı her response'a ekle (JS fetch için) ──────────────────────
+@app.after_request
+def inject_csrf_token(response):
+    response.set_cookie("csrf_token", generate_csrf())
+    return response
+
+
 # ── Yardımcı ───────────────────────────────────────────────────────────────
 def get_wallet():
     w = Wallet.query.filter_by(user_id=current_user.id).first()
@@ -104,6 +142,14 @@ def get_wallet():
         w = Wallet(user_id=current_user.id, balance=5)
         db.session.add(w); db.session.commit()
     return w
+
+
+def _admin_check() -> bool:
+    """Admin secret kontrolü — /db-test ve /db-kur için."""
+    admin_secret = os.environ.get("ADMIN_SECRET", "")
+    if not admin_secret:
+        return True  # Env var ayarlanmamışsa geliştirme modunda izin ver
+    return request.args.get("secret", "") == admin_secret
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -120,8 +166,8 @@ def ping():
 
 @app.route("/api/cache/status")
 @login_required
+@limiter.limit("30 per minute")
 def api_cache_status():
-    """Cache durumunu göster — hangi ticker ne zaman çekildi."""
     try:
         from backend.data_manager import cache_status
         status = cache_status()
@@ -136,8 +182,8 @@ def api_cache_status():
 
 @app.route("/api/cache/clear")
 @login_required
+@limiter.limit("10 per hour")
 def api_cache_clear():
-    """Belirli bir ticker'ın cache'ini temizle. ?ticker=AAPL"""
     ticker = request.args.get("ticker")
     try:
         from backend.data_manager import cache_clear
@@ -148,14 +194,13 @@ def api_cache_clear():
 
 
 @app.route("/api/refresh")
+@limiter.limit("5 per hour")
 def api_refresh():
     """
     Cron job bu endpoint'i çağırır → tüm tickerları günceller.
-    Harici cron (cron-job.org): her gün 18:00 UTC'de çağır.
-    Herhangi bir auth gerektirmez (cron servis header ekleyemez).
-    Güvenlik: sadece belirli bir CRON_SECRET ile çalışır.
+    CRON_SECRET env var ayarlanmışsa kimlik doğrulama zorunlu.
     """
-    secret = request.args.get("secret", "")
+    secret   = request.args.get("secret", "")
     expected = os.environ.get("CRON_SECRET", "")
 
     if expected and secret != expected:
@@ -165,10 +210,8 @@ def api_refresh():
 
     try:
         from backend.data_manager import get_processed_data, cache_clear
-        # Önce cache'i temizle → force fresh
         cache_clear()
 
-        # Sadece ilk 10 ticker'ı yenile (RAM koruması)
         for ticker in TICKERS_TO_TRAIN[:10]:
             try:
                 df = get_processed_data(ticker, force_refresh=True)
@@ -193,16 +236,28 @@ def api_refresh():
 
 
 def _market_open_check():
-    from datetime import datetime
-    now = datetime.utcnow()
-    if now.weekday() >= 5:
-        return False
-    return 14 <= now.hour < 21
+    try:
+        from zoneinfo import ZoneInfo
+        from datetime import datetime as dt
+        now_et = dt.now(tz=ZoneInfo("America/New_York"))
+        if now_et.weekday() >= 5:
+            return False
+        t = now_et.hour * 60 + now_et.minute
+        return 570 <= t < 960   # 09:30–16:00 ET
+    except Exception:
+        from datetime import datetime
+        now = datetime.utcnow()
+        if now.weekday() >= 5:
+            return False
+        return 14 <= now.hour < 21
 
 
 @app.route("/db-test")
 def db_test():
-    """DB bağlantısını test et — sorun teşhisi için."""
+    """DB bağlantısını test et — ADMIN_SECRET ile korumalı."""
+    if not _admin_check():
+        return jsonify({"error": "Yetkisiz erişim"}), 403
+
     info = {
         "db_url_set":    bool(os.environ.get("DATABASE_URL")),
         "db_url_prefix": (os.environ.get("DATABASE_URL") or "")[:30] + "...",
@@ -220,15 +275,16 @@ def db_test():
 @app.route("/db-kur")
 def db_kur():
     """
-    Tabloları yarat veya güncelle.
-    İlk deploy veya şema değişikliği sonrası bir kez ziyaret et:
-    https://fin-tap.onrender.com/db-kur
+    Tabloları yarat veya güncelle — ADMIN_SECRET ile korumalı.
+    İlk deploy veya şema değişikliği sonrası bir kez ziyaret et.
     """
+    if not _admin_check():
+        return jsonify({"error": "Yetkisiz erişim"}), 403
+
     try:
         with app.app_context():
             db.create_all()
 
-            # password kolonu 150 → 512 migration (PostgreSQL için)
             _db_url = app.config.get("SQLALCHEMY_DATABASE_URI", "")
             if "postgresql" in _db_url:
                 try:
@@ -309,9 +365,9 @@ def prices():
 def profile():
     w   = get_wallet()
     txs = Transaction.query.filter_by(user_id=current_user.id)\
-                     .order_by(Transaction.date.desc()).all()
+                     .order_by(Transaction.date.desc()).limit(50).all()
     prs = Prediction.query.filter_by(user_id=current_user.id)\
-                    .order_by(Prediction.created_at.desc()).all()
+                    .order_by(Prediction.created_at.desc()).limit(100).all()
     return render_template("profile.html", user=current_user, wallet=w,
                            balance=w.balance, transactions=txs, predictions=prs)
 
@@ -322,6 +378,8 @@ def profile():
 
 @app.route("/api/market_summary")
 @login_required
+@limiter.limit("30 per minute")
+@csrf.exempt
 def api_market_summary():
     result = []
     for t in TICKERS_TO_TRAIN[:12]:
@@ -341,7 +399,12 @@ def api_market_summary():
 
 @app.route("/api/history/<ticker>")
 @login_required
+@limiter.limit("60 per minute")
+@csrf.exempt
 def api_history(ticker):
+    # Ticker whitelist kontrolü
+    if ticker not in VALID_TICKERS:
+        return jsonify({"error": "Geçersiz ticker"}), 400
     try:
         df = get_processed_data(ticker)
         if df is None or df.empty:
@@ -358,11 +421,17 @@ def api_history(ticker):
 
 @app.route("/api/compare_stocks")
 @login_required
+@limiter.limit("20 per minute")
+@csrf.exempt
 def api_compare():
-    t1 = request.args.get("ticker1")
-    t2 = request.args.get("ticker2")
+    t1 = request.args.get("ticker1", "").upper()
+    t2 = request.args.get("ticker2", "").upper()
+
     if not t1 or not t2:
         return jsonify({"error": "Eksik parametre"}), 400
+    if t1 not in VALID_TICKERS or t2 not in VALID_TICKERS:
+        return jsonify({"error": "Geçersiz ticker"}), 400
+
     try:
         m1 = get_suggestion_metrics(t1)
         m2 = get_suggestion_metrics(t2)
@@ -379,13 +448,30 @@ def api_compare():
     })
 
 
+VALID_MODELS = {"LINEAR","RANDOM_FOREST","EXTRA_TREES","GRADIENT_BOOST",
+                "XGBOOST","LIGHTGBM","LSTM"}
+
+
 @app.route("/api/predict_run", methods=["POST"])
 @login_required
+@limiter.limit("10 per hour")
+@csrf.exempt
 def api_predict_run():
     payload  = request.get_json(silent=True) or {}
-    ticker   = payload.get("ticker",   "AAPL")
-    model    = payload.get("model",    "LINEAR")
+    ticker   = str(payload.get("ticker", "AAPL")).upper().strip()
+    model    = str(payload.get("model",  "LINEAR")).upper().strip()
     features = payload.get("features", [])
+
+    # Input validation
+    if ticker not in VALID_TICKERS:
+        return jsonify({"error": f"Geçersiz ticker: {ticker}"}), 400
+    if model not in VALID_MODELS:
+        return jsonify({"error": f"Geçersiz model: {model}"}), 400
+    if not isinstance(features, list):
+        return jsonify({"error": "features bir liste olmalı"}), 400
+    invalid_feats = [f for f in features if f not in VALID_FEATURE_GROUPS]
+    if invalid_feats:
+        return jsonify({"error": f"Geçersiz feature group(lar): {invalid_feats}"}), 400
 
     w = get_wallet()
     if w.balance <= 0:
@@ -409,6 +495,7 @@ def api_predict_run():
         }), 500
 
     w.balance -= 1
+    w.last_updated = __import__("datetime").datetime.utcnow()
     try:
         db.session.add(Prediction(
             user_id=current_user.id, symbol=ticker, model_type=model,
@@ -427,11 +514,159 @@ def api_predict_run():
     })
 
 
+# ── Watchlist API ──────────────────────────────────────────────────────────
+
+@app.route("/api/watchlist", methods=["GET"])
+@login_required
+@limiter.limit("60 per minute")
+@csrf.exempt
+def api_watchlist_get():
+    """Kullanıcının takip listesini döndür."""
+    items = Watchlist.query.filter_by(user_id=current_user.id)\
+                    .order_by(Watchlist.added_at.desc()).all()
+    result = []
+    for item in items:
+        try:
+            df = get_processed_data(item.symbol)
+            price = change = None
+            if df is not None and not df.empty:
+                cur   = float(df["Close"].iloc[-1])
+                prev  = float(df["Close"].iloc[-2])
+                price  = round(cur, 2)
+                change = round(((cur - prev) / prev) * 100, 2)
+        except Exception:
+            price = change = None
+        result.append({
+            "symbol":   item.symbol,
+            "added_at": item.added_at.strftime("%Y-%m-%d"),
+            "price":    price,
+            "change":   change,
+        })
+    return jsonify(result)
+
+
+@app.route("/api/watchlist", methods=["POST"])
+@login_required
+@limiter.limit("30 per hour")
+@csrf.exempt
+def api_watchlist_add():
+    """Takip listesine hisse ekle."""
+    payload = request.get_json(silent=True) or {}
+    symbol  = str(payload.get("symbol", "")).upper().strip()
+
+    if not symbol:
+        return jsonify({"error": "symbol gerekli"}), 400
+    if symbol not in VALID_TICKERS:
+        return jsonify({"error": "Geçersiz ticker"}), 400
+
+    existing = Watchlist.query.filter_by(
+        user_id=current_user.id, symbol=symbol
+    ).first()
+    if existing:
+        return jsonify({"status": "already_exists", "symbol": symbol})
+
+    item = Watchlist(user_id=current_user.id, symbol=symbol)
+    db.session.add(item)
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+    return jsonify({"status": "added", "symbol": symbol})
+
+
+@app.route("/api/watchlist/<symbol>", methods=["DELETE"])
+@login_required
+@limiter.limit("30 per hour")
+@csrf.exempt
+def api_watchlist_remove(symbol):
+    """Takip listesinden hisse çıkar."""
+    symbol = symbol.upper().strip()
+    item   = Watchlist.query.filter_by(
+        user_id=current_user.id, symbol=symbol
+    ).first()
+    if not item:
+        return jsonify({"error": "Bulunamadı"}), 404
+    db.session.delete(item)
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+    return jsonify({"status": "removed", "symbol": symbol})
+
+
+# ── Prediction Accuracy API ────────────────────────────────────────────────
+
+@app.route("/api/accuracy/update")
+@login_required
+@limiter.limit("5 per hour")
+@csrf.exempt
+def api_accuracy_update():
+    """
+    Geçmiş tahminlerin doğruluğunu günceller.
+    Tahmin tarihinden 14 gün sonra gerçek kapanış fiyatını çekip karşılaştırır.
+    """
+    from datetime import datetime, timedelta
+    updated = 0
+    errors  = 0
+
+    preds = Prediction.query.filter_by(
+        user_id=current_user.id, accuracy_pct=None
+    ).filter(
+        Prediction.created_at < datetime.utcnow() - timedelta(days=14)
+    ).limit(20).all()
+
+    for pred in preds:
+        try:
+            df = get_processed_data(pred.symbol)
+            if df is None or df.empty:
+                continue
+
+            target_date = pred.created_at + timedelta(days=14)
+            future_rows = df[df.index >= target_date]
+            if future_rows.empty:
+                continue
+
+            actual_price = float(future_rows["Close"].iloc[0])
+            if not pred.predicted_result:
+                continue
+
+            predicted_price = float(pred.predicted_result.replace("$", ""))
+            accuracy = 100 - abs((actual_price - predicted_price) / actual_price * 100)
+            pred.accuracy_pct = round(max(accuracy, 0), 2)
+            updated += 1
+        except Exception as e:
+            print(f"[accuracy_update] {pred.id}: {e}")
+            errors += 1
+
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+    return jsonify({"updated": updated, "errors": errors})
+
+
 # ══════════════════════════════════════════════════════════════════════════
 #  AUTH
 # ══════════════════════════════════════════════════════════════════════════
 
+def _password_strong(pw: str) -> tuple[bool, str]:
+    """Şifre güvenlik kontrolü. (bool, hata_mesajı)"""
+    if len(pw) < 8:
+        return False, "Şifre en az 8 karakter olmalı."
+    has_letter = any(c.isalpha() for c in pw)
+    has_digit  = any(c.isdigit() for c in pw)
+    if not has_letter or not has_digit:
+        return False, "Şifre en az 1 harf ve 1 rakam içermeli."
+    return True, ""
+
+
 @app.route("/register", methods=["GET", "POST"])
+@limiter.limit("10 per hour")
 def register():
     if current_user.is_authenticated:
         return redirect(url_for("root"))
@@ -439,18 +674,26 @@ def register():
         email    = (request.form.get("email")    or "").strip().lower()
         name     = (request.form.get("name")     or "").strip()
         password =  request.form.get("password") or ""
+
         if not email or not name or not password:
             flash("Tüm alanları doldurun.", "error")
             return redirect(url_for("register"))
-        if User.query.filter_by(email=email).first():
-            flash("Bu e-posta zaten kayıtlı.", "error")
+
+        ok, msg = _password_strong(password)
+        if not ok:
+            flash(msg, "error")
             return redirect(url_for("register"))
+
+        # Email enumeration'ı önle: aynı generic hata mesajını kullan
+        if User.query.filter_by(email=email).first():
+            flash("Kayıt tamamlanamadı. Lütfen farklı bir e-posta deneyin.", "error")
+            return redirect(url_for("register"))
+
         try:
             hashed_pw = generate_password_hash(password)
-            print(f"[register] hash uzunluğu: {len(hashed_pw)}")  # debug
-            user = User(email=email, name=name, password=hashed_pw)
+            user   = User(email=email, name=name, password=hashed_pw)
             db.session.add(user)
-            db.session.flush()   # user.id'yi al, commit etme henüz
+            db.session.flush()
             wallet = Wallet(user_id=user.id, balance=5)
             db.session.add(wallet)
             db.session.commit()
@@ -461,11 +704,12 @@ def register():
             db.session.rollback()
             print(f"[register] HATA: {type(e).__name__}: {e}")
             traceback.print_exc()
-            flash(f"Kayıt hatası: {str(e)[:100]}", "error")
+            flash("Kayıt sırasında bir hata oluştu. Lütfen tekrar deneyin.", "error")
     return render_template("register.html")
 
 
 @app.route("/login", methods=["GET", "POST"])
+@limiter.limit("20 per hour")
 def login():
     if current_user.is_authenticated:
         return redirect(url_for("root"))
@@ -492,6 +736,13 @@ def logout():
 def e404(e):
     if request.path.startswith("/api/"):
         return jsonify({"error": "Endpoint bulunamadı"}), 404
+    return redirect(url_for("root"))
+
+@app.errorhandler(429)
+def rate_limit_exceeded(e):
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "Çok fazla istek. Lütfen bekleyin."}), 429
+    flash("Çok fazla istek gönderildi. Lütfen biraz bekleyin.", "error")
     return redirect(url_for("root"))
 
 @app.errorhandler(500)

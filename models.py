@@ -5,6 +5,11 @@ DÜZELTİLEN KRİTİK SORUN:
   Werkzeug 3.x scrypt algoritması kullanıyor → hash = 162 karakter
   Eski: password = db.Column(db.String(150))  ← 150 < 162 → TRUNCATION → kayıt başarısız
   Yeni: password = db.Column(db.String(512))  ← her algoritma için yeterli
+
+V0.7 EKLEMELERİ:
+  - DB index'leri eklendi (user_id foreign key'leri)
+  - Watchlist modeli eklendi (favori hisse takibi)
+  - Prediction.accuracy_pct eklendi (gerçek fiyat geldikten sonra doldurulur)
 """
 from __future__ import annotations
 
@@ -19,27 +24,31 @@ class User(UserMixin, db.Model):
     __tablename__ = "user"
 
     id         = db.Column(db.Integer, primary_key=True)
-    email      = db.Column(db.String(255), unique=True, nullable=False)
-    password   = db.Column(db.String(512), nullable=False)   # 150 → 512 (scrypt hash)
+    email      = db.Column(db.String(255), unique=True, nullable=False, index=True)
+    password   = db.Column(db.String(512), nullable=False)
     name       = db.Column(db.String(255), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     wallet       = db.relationship("Wallet",      backref="user", uselist=False)
     transactions = db.relationship("Transaction", backref="user", lazy=True)
     predictions  = db.relationship("Prediction",  backref="user", lazy=True)
+    watchlist    = db.relationship("Watchlist",   backref="user", lazy=True)
 
 
 class Wallet(db.Model):
     __tablename__ = "wallet"
 
     id           = db.Column(db.Integer, primary_key=True)
-    user_id      = db.Column(db.Integer, db.ForeignKey("user.id"), unique=True)
+    user_id      = db.Column(db.Integer, db.ForeignKey("user.id"), unique=True, index=True)
     balance      = db.Column(db.Integer, default=5)
     last_updated = db.Column(db.DateTime, default=datetime.utcnow)
 
 
 class Transaction(db.Model):
     __tablename__ = "transaction"
+    __table_args__ = (
+        db.Index("ix_transaction_user_id", "user_id"),
+    )
 
     id           = db.Column(db.Integer, primary_key=True)
     user_id      = db.Column(db.Integer, db.ForeignKey("user.id"))
@@ -50,10 +59,28 @@ class Transaction(db.Model):
 
 class Prediction(db.Model):
     __tablename__ = "prediction"
+    __table_args__ = (
+        db.Index("ix_prediction_user_id", "user_id"),
+    )
 
     id               = db.Column(db.Integer, primary_key=True)
     user_id          = db.Column(db.Integer, db.ForeignKey("user.id"))
     symbol           = db.Column(db.String(20),  nullable=False)
     model_type       = db.Column(db.String(50))
     predicted_result = db.Column(db.String(100))
+    accuracy_pct     = db.Column(db.Float, nullable=True)   # Gerçek fiyatla karşılaştırıldıktan sonra dolar
     created_at       = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class Watchlist(db.Model):
+    """Kullanıcının takip listesindeki hisseler."""
+    __tablename__ = "watchlist"
+    __table_args__ = (
+        db.Index("ix_watchlist_user_id", "user_id"),
+        db.UniqueConstraint("user_id", "symbol", name="uq_watchlist_user_symbol"),
+    )
+
+    id         = db.Column(db.Integer, primary_key=True)
+    user_id    = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    symbol     = db.Column(db.String(20), nullable=False)
+    added_at   = db.Column(db.DateTime, default=datetime.utcnow)
