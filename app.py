@@ -115,6 +115,36 @@ def ping():
     return "OK", 200
 
 
+@app.route("/db-kur")
+def db_kur():
+    """
+    Tabloları yarat veya güncelle.
+    İlk deploy veya şema değişikliği sonrası bir kez ziyaret et:
+    https://fin-tap.onrender.com/db-kur
+    """
+    try:
+        with app.app_context():
+            db.create_all()
+
+            # password kolonu 150 → 512 migration (PostgreSQL için)
+            _db_url = app.config.get("SQLALCHEMY_DATABASE_URI", "")
+            if "postgresql" in _db_url:
+                try:
+                    db.session.execute(db.text(
+                        "ALTER TABLE \"user\" "
+                        "ALTER COLUMN password TYPE VARCHAR(512)"
+                    ))
+                    db.session.commit()
+                    print("[db-kur] password kolonu 512'ye genişletildi")
+                except Exception as alter_e:
+                    db.session.rollback()
+                    print(f"[db-kur] ALTER zaten yapılmış veya hata: {alter_e}")
+
+        return "Veritabanı kuruldu ve güncellendi ✓", 200
+    except Exception as e:
+        return f"Hata: {e}", 500
+
+
 @app.route("/")
 def root():
     if current_user.is_authenticated:
@@ -314,17 +344,22 @@ def register():
             flash("Bu e-posta zaten kayıtlı.", "error")
             return redirect(url_for("register"))
         try:
-            user = User(email=email, name=name,
-                        password=generate_password_hash(password))
-            db.session.add(user); db.session.commit()
-            db.session.add(Wallet(user_id=user.id, balance=5))
+            hashed_pw = generate_password_hash(password)
+            print(f"[register] hash uzunluğu: {len(hashed_pw)}")  # debug
+            user = User(email=email, name=name, password=hashed_pw)
+            db.session.add(user)
+            db.session.flush()   # user.id'yi al, commit etme henüz
+            wallet = Wallet(user_id=user.id, balance=5)
+            db.session.add(wallet)
             db.session.commit()
             login_user(user)
+            print(f"[register] Yeni kullanıcı: {email}")
             return redirect(url_for("root"))
         except Exception as e:
             db.session.rollback()
-            print(f"[register] {e}"); traceback.print_exc()
-            flash("Kayıt hatası oluştu.", "error")
+            print(f"[register] HATA: {type(e).__name__}: {e}")
+            traceback.print_exc()
+            flash(f"Kayıt hatası: {str(e)[:100]}", "error")
     return render_template("register.html")
 
 
