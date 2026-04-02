@@ -765,43 +765,54 @@ def stripe_webhook():
     sig_header = request.headers.get("Stripe-Signature", "")
     wh_secret  = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 
+    # 1) İmza doğrulama / parse
     try:
         if wh_secret:
             event = stripe.Webhook.construct_event(payload, sig_header, wh_secret)
         else:
-            # Geliştirme ortamı: imza doğrulaması yapma
             print("[stripe webhook] UYARI: STRIPE_WEBHOOK_SECRET eksik, imza doğrulanmıyor!")
             event = json.loads(payload)
     except Exception as e:
         print(f"[stripe webhook] imza/parse hatası: {e}")
         return jsonify({"error": str(e)}), 400
 
-    if event.get("type") == "checkout.session.completed":
-        sess    = event["data"]["object"]
-        meta    = sess.get("metadata") or {}
-        user_id = int(meta.get("user_id", 0))
-        tokens  = int(meta.get("tokens",  0))
-        pack_id = meta.get("pack_id", "")
+    # 2) Event işleme — tüm mantık tek try/except içinde
+    try:
+        # Stripe SDK hem dict hem attribute erişimini destekler; her ikisini de dene
+        if isinstance(event, dict):
+            event_type = event.get("type", "")
+            sess       = event["data"]["object"]
+            raw_meta   = sess.get("metadata") or {}
+        else:
+            event_type = getattr(event, "type", "") or ""
+            sess       = event.data.object
+            raw_meta   = getattr(sess, "metadata", None) or {}
 
-        if user_id and tokens:
-            try:
-                w = Wallet.query.filter_by(user_id=user_id).first()
-                if not w:
-                    w = Wallet(user_id=user_id, balance=0)
-                    db.session.add(w)
-                w.balance += tokens
+        meta    = dict(raw_meta) if hasattr(raw_meta, "keys") else {}
+        user_id = int(meta.get("user_id") or 0)
+        tokens  = int(meta.get("tokens")  or 0)
+        pack_id = str(meta.get("pack_id") or "")
 
-                pack      = TOKEN_PACKS.get(pack_id, {})
-                amount    = pack.get("price_cents", 0) / 100
-                tx = Transaction(user_id=user_id, amount_paid=amount, tokens_added=tokens)
-                db.session.add(tx)
-                db.session.commit()
-                print(f"[stripe webhook] user={user_id} +{tokens} token eklendi (pack={pack_id})")
-            except Exception as e:
-                db.session.rollback()
-                print(f"[stripe webhook] DB hatası: {e}")
-                traceback.print_exc()
-                return jsonify({"error": str(e)}), 500
+        print(f"[stripe webhook] event={event_type} user={user_id} tokens={tokens} pack={pack_id}")
+
+        if event_type == "checkout.session.completed" and user_id and tokens:
+            w = Wallet.query.filter_by(user_id=user_id).first()
+            if not w:
+                w = Wallet(user_id=user_id, balance=0)
+                db.session.add(w)
+            w.balance += tokens
+
+            pack   = TOKEN_PACKS.get(pack_id, {})
+            amount = pack.get("price_cents", 0) / 100
+            db.session.add(Transaction(user_id=user_id, amount_paid=amount, tokens_added=tokens))
+            db.session.commit()
+            print(f"[stripe webhook] user={user_id} +{tokens} token eklendi OK")
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"[stripe webhook] HATA: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)[:200]}), 500
 
     return jsonify({"status": "ok"})
 
