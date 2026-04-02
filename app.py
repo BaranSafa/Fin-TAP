@@ -127,6 +127,15 @@ with app.app_context():
     except Exception as e:
         print(f"[app] db.create_all hatası: {e}")
 
+    # V0.7 migrasyon: prediction tablosuna accuracy_pct kolonu ekle (yoksa)
+    try:
+        db.session.execute(db.text("ALTER TABLE prediction ADD COLUMN accuracy_pct FLOAT"))
+        db.session.commit()
+        print("[app] Migrasyon: prediction.accuracy_pct kolonu eklendi OK")
+    except Exception:
+        db.session.rollback()
+        # Kolon zaten mevcut, sorun yok
+
 
 # ── CSRF token'ı her response'a ekle (JS fetch için) ──────────────────────
 @app.after_request
@@ -297,6 +306,17 @@ def db_kur():
                 except Exception as alter_e:
                     db.session.rollback()
                     print(f"[db-kur] ALTER zaten yapılmış veya hata: {alter_e}")
+
+            # V0.7 migrasyon: accuracy_pct kolonu (PostgreSQL ve SQLite için)
+            try:
+                db.session.execute(db.text(
+                    "ALTER TABLE prediction ADD COLUMN accuracy_pct FLOAT"
+                ))
+                db.session.commit()
+                print("[db-kur] prediction.accuracy_pct kolonu eklendi")
+            except Exception as alter_e:
+                db.session.rollback()
+                print(f"[db-kur] accuracy_pct zaten mevcut veya hata: {alter_e}")
 
         return "Veritabanı kuruldu ve güncellendi ✓", 200
     except Exception as e:
