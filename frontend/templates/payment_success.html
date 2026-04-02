@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Payment Successful — Fin-TAP{% endblock %}
+{% block header_title %}Payment Successful{% endblock %}
+{% block header_sub %}STRIPE CHECKOUT · TOKEN PURCHASE COMPLETE{% endblock %}
+
+{% block content %}
+<style>
+    .success-wrap {
+        max-width: 520px;
+        margin: 60px auto 0;
+        text-align: center;
+    }
+    .success-icon {
+        font-size: 3.5rem;
+        margin-bottom: 20px;
+        animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) both;
+    }
+    @keyframes popIn {
+        from { transform: scale(0.4); opacity: 0; }
+        to   { transform: scale(1);   opacity: 1; }
+    }
+    .success-title {
+        font-size: 1.6rem;
+        font-weight: 800;
+        margin-bottom: 10px;
+        color: var(--green);
+    }
+    .success-sub {
+        font-size: 0.88rem;
+        color: var(--text2);
+        line-height: 1.6;
+        margin-bottom: 32px;
+    }
+    .balance-box {
+        background: var(--surface);
+        border: 1px solid rgba(0,230,118,0.3);
+        border-radius: 12px;
+        padding: 28px;
+        margin-bottom: 28px;
+    }
+    .bal-label {
+        font-family: var(--mono);
+        font-size: 0.6rem;
+        letter-spacing: 3px;
+        color: var(--text3);
+        margin-bottom: 8px;
+    }
+    .bal-value {
+        font-family: var(--mono);
+        font-size: 3rem;
+        font-weight: 700;
+        color: var(--amber);
+    }
+    .bal-unit {
+        font-size: 0.9rem;
+        color: var(--text2);
+        margin-left: 6px;
+    }
+    .note-box {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 14px 18px;
+        font-size: 0.78rem;
+        color: var(--text2);
+        margin-bottom: 28px;
+        text-align: left;
+        line-height: 1.6;
+    }
+    .note-box strong { color: var(--text); }
+    .action-row {
+        display: flex;
+        gap: 12px;
+        justify-content: center;
+    }
+</style>
+
+<div class="success-wrap fade-up">
+    <div class="success-icon">✅</div>
+    <div class="success-title">Payment Confirmed!</div>
+    <div class="success-sub">
+        Your tokens have been added to your wallet.<br>
+        You're ready to run more AI predictions.
+    </div>
+
+    <div class="balance-box">
+        <div class="bal-label">// YOUR CURRENT BALANCE</div>
+        <div class="bal-value">{{ balance }}<span class="bal-unit">TOKENS</span></div>
+    </div>
+
+    <div class="note-box">
+        <strong>What just happened?</strong><br>
+        Stripe processed your payment securely. Your token balance was updated automatically
+        via our webhook system. Each token gives you 1 AI prediction on any stock or crypto asset.
+        {% if session_id %}
+        <br><br><span style="font-family:var(--mono); font-size:0.68rem; color:var(--text3);">
+            Session: {{ session_id[:24] }}…
+        </span>
+        {% endif %}
+    </div>
+
+    <div class="action-row">
+        <a href="/predict" class="btn btn-primary">🤖 Run a Prediction</a>
+        <a href="/prices"  class="btn btn-ghost">💳 Buy More Tokens</a>
+    </div>
+</div>
+{% endblock %}

@@ -21,8 +21,18 @@
     .hot-tag { position:absolute; top:-11px; left:50%; transform:translateX(-50%); background:var(--accent); color:#000; font-family:var(--mono); font-size:0.6rem; font-weight:700; letter-spacing:2px; padding:3px 14px; border-radius:100px; white-space:nowrap; }
     .pack-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-top:16px; }
     .pack-card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:20px; text-align:center; transition:all 0.2s; position:relative; }
-    .pack-card.soon { opacity:0.55; }
-    .pack-card.soon::after { content:'COMING SOON'; position:absolute; top:8px; right:8px; font-family:var(--mono); font-size:0.5rem; color:var(--text3); letter-spacing:1px; }
+    .pack-card { cursor:pointer; }
+    .pack-card:hover { border-color:var(--accent); transform:translateY(-2px); }
+    .pack-buy-btn {
+        margin-top:14px; width:100%;
+        background:var(--accent); color:#000;
+        border:none; border-radius:6px;
+        font-family:var(--mono); font-size:0.68rem; font-weight:700; letter-spacing:1px;
+        padding:9px 0; cursor:pointer; transition:all 0.2s;
+    }
+    .pack-buy-btn:hover   { background:#fff; }
+    .pack-buy-btn:disabled { background:var(--surface3); color:var(--text3); cursor:not-allowed; }
+    .pack-best { position:absolute; top:8px; right:8px; font-family:var(--mono); font-size:0.5rem; color:var(--amber); letter-spacing:1px; }
     .pack-tokens { font-family:var(--mono); font-size:1.8rem; font-weight:700; color:var(--amber); margin-bottom:4px; }
     .pack-label  { font-size:0.72rem; color:var(--text2); margin-bottom:12px; }
     .pack-price  { font-family:var(--mono); font-size:1rem; font-weight:700; margin-bottom:4px; }
@@ -101,33 +111,38 @@
     <div class="sec-label" style="text-align:center;">// ONE-TIME TOKEN PACKS</div>
     <div style="text-align:center; font-size:0.82rem; color:var(--text2); margin-bottom:0;">No subscription needed — buy tokens as you go.</div>
     <div class="pack-grid">
-        <div class="pack-card soon">
+        <div class="pack-card">
             <div class="pack-tokens">20</div>
             <div class="pack-label">Starter Pack</div>
             <div class="pack-price">$2.99</div>
             <div class="pack-unit">$0.15 / token</div>
+            <button class="pack-buy-btn" onclick="buyPack('starter', this)">BUY NOW →</button>
         </div>
-        <div class="pack-card soon">
+        <div class="pack-card">
             <div class="pack-tokens">50</div>
             <div class="pack-label">Explorer Pack</div>
             <div class="pack-price">$5.99</div>
             <div class="pack-unit">$0.12 / token</div>
+            <button class="pack-buy-btn" onclick="buyPack('explorer', this)">BUY NOW →</button>
         </div>
-        <div class="pack-card soon">
+        <div class="pack-card">
+            <div class="pack-best">BEST VALUE</div>
             <div class="pack-tokens">100</div>
             <div class="pack-label">Pro Pack</div>
             <div class="pack-price">$9.99</div>
             <div class="pack-unit">$0.10 / token</div>
+            <button class="pack-buy-btn" onclick="buyPack('pro', this)">BUY NOW →</button>
         </div>
-        <div class="pack-card soon">
+        <div class="pack-card">
             <div class="pack-tokens">500</div>
             <div class="pack-label">Whale Pack</div>
             <div class="pack-price">$39.99</div>
             <div class="pack-unit">$0.08 / token</div>
+            <button class="pack-buy-btn" onclick="buyPack('whale', this)">BUY NOW →</button>
         </div>
     </div>
     <div style="text-align:center; margin-top:12px; font-family:var(--mono); font-size:0.65rem; color:var(--text3);">
-        Stripe payment integration arriving April 2026 — sign up to be notified.
+        Powered by <span style="color:var(--accent);">Stripe</span> — secure, encrypted payments. Tokens added instantly after checkout.
     </div>
 </div>
 
@@ -157,4 +172,32 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function buyPack(packId, btn) {
+    btn.disabled = true;
+    btn.textContent = 'PROCESSING…';
+    try {
+        const res  = await fetch('/api/payment/create-checkout-session', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ pack: packId }),
+        });
+        const data = await res.json();
+        if (data.url) {
+            window.location.href = data.url;
+        } else {
+            alert(data.error || 'Ödeme başlatılamadı. Lütfen tekrar deneyin.');
+            btn.disabled = false;
+            btn.textContent = 'BUY NOW →';
+        }
+    } catch (e) {
+        alert('Bağlantı hatası. Lütfen tekrar deneyin.');
+        btn.disabled = false;
+        btn.textContent = 'BUY NOW →';
+    }
+}
+</script>
 {% endblock %}

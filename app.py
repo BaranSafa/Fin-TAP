@@ -1,6 +1,12 @@
 """
 app.py  —  Fin-TAP  (Render production-grade)
 
+V0.8 Güncellemeleri:
+  1. Stripe Payment Integration: token paketleri için checkout session
+  2. Stripe Webhook: ödeme tamamlandığında token bakiyesi güncelleme
+  3. /payment/success sayfası eklendi
+  4. prices.html buy butonları aktive edildi
+
 V0.7 Güncellemeleri:
   1. Flask-Limiter: Rate limiting eklendi (DDoS koruması)
   2. Flask-WTF: CSRF koruması form route'larına eklendi
@@ -15,7 +21,7 @@ V0.7 Güncellemeleri:
 """
 from __future__ import annotations
 
-import os, sys, traceback, secrets
+import os, sys, traceback, secrets, json
 from sqlalchemy import inspect as db_inspect
 from flask import (Flask, render_template, redirect, url_for,
                    flash, request, jsonify, session)
@@ -471,6 +477,26 @@ def api_compare():
 VALID_MODELS = {"LINEAR","RANDOM_FOREST","EXTRA_TREES","GRADIENT_BOOST",
                 "XGBOOST","LIGHTGBM","LSTM"}
 
+# ── Stripe ─────────────────────────────────────────────────────────────────
+TOKEN_PACKS = {
+    "starter":  {"tokens": 20,  "price_cents": 299,  "name": "Starter Pack  (20 Tokens)"},
+    "explorer": {"tokens": 50,  "price_cents": 599,  "name": "Explorer Pack (50 Tokens)"},
+    "pro":      {"tokens": 100, "price_cents": 999,  "name": "Pro Pack      (100 Tokens)"},
+    "whale":    {"tokens": 500, "price_cents": 3999, "name": "Whale Pack    (500 Tokens)"},
+}
+
+try:
+    import stripe as _stripe_lib
+    _stripe_key = os.environ.get("STRIPE_SECRET_KEY", "")
+    _stripe_lib.api_key = _stripe_key
+    _stripe_ok = bool(_stripe_key)
+    stripe = _stripe_lib
+    print(f"[app] Stripe {'aktif' if _stripe_ok else 'STRIPE_SECRET_KEY eksik — test/prod için env ayarla'}")
+except ImportError:
+    stripe = None
+    _stripe_ok = False
+    print("[app] stripe paketi yüklü değil — 'pip install stripe' çalıştır")
+
 
 @app.route("/api/predict_run", methods=["POST"])
 @login_required
@@ -668,6 +694,126 @@ def api_accuracy_update():
         return jsonify({"error": str(e)}), 500
 
     return jsonify({"updated": updated, "errors": errors})
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  PAYMENT (Stripe)
+# ══════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/payment/create-checkout-session", methods=["POST"])
+@login_required
+@limiter.limit("20 per hour")
+@csrf.exempt
+def api_create_checkout():
+    """Stripe Checkout oturumu oluştur → URL döndür, frontend oraya yönlendirir."""
+    if not _stripe_ok:
+        return jsonify({"error": "Ödeme sistemi henüz aktif değil. STRIPE_SECRET_KEY env var'ı ayarlanmamış."}), 503
+
+    payload = request.get_json(silent=True) or {}
+    pack_id = str(payload.get("pack", "")).lower().strip()
+
+    if pack_id not in TOKEN_PACKS:
+        return jsonify({"error": "Geçersiz paket"}), 400
+
+    pack       = TOKEN_PACKS[pack_id]
+    base_url   = request.host_url.rstrip("/")
+    success_url = f"{base_url}/payment/success?session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url  = f"{base_url}/prices"
+
+    try:
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            line_items=[{
+                "price_data": {
+                    "currency": "usd",
+                    "product_data": {
+                        "name": f"Fin-TAP {pack['name']}",
+                        "description": f"{pack['tokens']} AI prediction token — Fin-TAP platform",
+                    },
+                    "unit_amount": pack["price_cents"],
+                },
+                "quantity": 1,
+            }],
+            mode="payment",
+            success_url=success_url,
+            cancel_url=cancel_url,
+            metadata={
+                "user_id": str(current_user.id),
+                "pack_id": pack_id,
+                "tokens":  str(pack["tokens"]),
+            },
+        )
+        print(f"[stripe] checkout session oluşturuldu: user={current_user.id} pack={pack_id}")
+        return jsonify({"url": session.url})
+    except Exception as e:
+        print(f"[stripe] checkout session hatası: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)[:300]}), 500
+
+
+@app.route("/api/payment/webhook", methods=["POST"])
+@csrf.exempt
+def stripe_webhook():
+    """
+    Stripe'ın çağırdığı webhook endpoint'i.
+    checkout.session.completed olayını dinler → token bakiyesini günceller.
+    """
+    if not _stripe_ok:
+        return "", 400
+
+    payload    = request.get_data()
+    sig_header = request.headers.get("Stripe-Signature", "")
+    wh_secret  = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+
+    try:
+        if wh_secret:
+            event = stripe.Webhook.construct_event(payload, sig_header, wh_secret)
+        else:
+            # Geliştirme ortamı: imza doğrulaması yapma
+            print("[stripe webhook] UYARI: STRIPE_WEBHOOK_SECRET eksik, imza doğrulanmıyor!")
+            event = json.loads(payload)
+    except Exception as e:
+        print(f"[stripe webhook] imza/parse hatası: {e}")
+        return jsonify({"error": str(e)}), 400
+
+    if event.get("type") == "checkout.session.completed":
+        sess    = event["data"]["object"]
+        meta    = sess.get("metadata") or {}
+        user_id = int(meta.get("user_id", 0))
+        tokens  = int(meta.get("tokens",  0))
+        pack_id = meta.get("pack_id", "")
+
+        if user_id and tokens:
+            try:
+                w = Wallet.query.filter_by(user_id=user_id).first()
+                if not w:
+                    w = Wallet(user_id=user_id, balance=0)
+                    db.session.add(w)
+                w.balance += tokens
+
+                pack      = TOKEN_PACKS.get(pack_id, {})
+                amount    = pack.get("price_cents", 0) / 100
+                tx = Transaction(user_id=user_id, amount_paid=amount, tokens_added=tokens)
+                db.session.add(tx)
+                db.session.commit()
+                print(f"[stripe webhook] user={user_id} +{tokens} token eklendi (pack={pack_id})")
+            except Exception as e:
+                db.session.rollback()
+                print(f"[stripe webhook] DB hatası: {e}")
+                traceback.print_exc()
+                return jsonify({"error": str(e)}), 500
+
+    return jsonify({"status": "ok"})
+
+
+@app.route("/payment/success")
+@login_required
+def payment_success():
+    """Stripe başarılı ödeme sonrası yönlendirme sayfası."""
+    w = get_wallet()
+    return render_template("payment_success.html", user=current_user,
+                           balance=w.balance,
+                           session_id=request.args.get("session_id", ""))
 
 
 # ══════════════════════════════════════════════════════════════════════════
