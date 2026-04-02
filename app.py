@@ -778,35 +778,39 @@ def stripe_webhook():
 
     # 2) Event işleme — tüm mantık tek try/except içinde
     try:
-        # Stripe SDK hem dict hem attribute erişimini destekler; her ikisini de dene
-        if isinstance(event, dict):
-            event_type = event.get("type", "")
-            sess       = event["data"]["object"]
-            raw_meta   = sess.get("metadata") or {}
-        else:
-            event_type = getattr(event, "type", "") or ""
-            sess       = event.data.object
-            raw_meta   = getattr(sess, "metadata", None) or {}
+        event_type = event.get("type", "") if isinstance(event, dict) else getattr(event, "type", "")
 
-        meta    = dict(raw_meta) if hasattr(raw_meta, "keys") else {}
-        user_id = int(meta.get("user_id") or 0)
-        tokens  = int(meta.get("tokens")  or 0)
-        pack_id = str(meta.get("pack_id") or "")
+        if event_type == "checkout.session.completed":
+            # Session ID'yi al
+            raw_obj    = event["data"]["object"] if isinstance(event, dict) else event.data.object
+            session_id = raw_obj.get("id", "") if isinstance(raw_obj, dict) else getattr(raw_obj, "id", "")
 
-        print(f"[stripe webhook] event={event_type} user={user_id} tokens={tokens} pack={pack_id}")
+            # Stripe API'den full session çek — metadata webhook payload'ında eksik gelebilir
+            full_sess = stripe.checkout.Session.retrieve(session_id)
+            raw_meta  = full_sess.get("metadata") if isinstance(full_sess, dict) \
+                        else getattr(full_sess, "metadata", None)
+            meta    = dict(raw_meta) if raw_meta and hasattr(raw_meta, "keys") else {}
 
-        if event_type == "checkout.session.completed" and user_id and tokens:
-            w = Wallet.query.filter_by(user_id=user_id).first()
-            if not w:
-                w = Wallet(user_id=user_id, balance=0)
-                db.session.add(w)
-            w.balance += tokens
+            user_id = int(meta.get("user_id") or 0)
+            tokens  = int(meta.get("tokens")  or 0)
+            pack_id = str(meta.get("pack_id") or "")
 
-            pack   = TOKEN_PACKS.get(pack_id, {})
-            amount = pack.get("price_cents", 0) / 100
-            db.session.add(Transaction(user_id=user_id, amount_paid=amount, tokens_added=tokens))
-            db.session.commit()
-            print(f"[stripe webhook] user={user_id} +{tokens} token eklendi OK")
+            print(f"[stripe webhook] session={session_id} user={user_id} tokens={tokens} pack={pack_id}")
+
+            if user_id and tokens:
+                w = Wallet.query.filter_by(user_id=user_id).first()
+                if not w:
+                    w = Wallet(user_id=user_id, balance=0)
+                    db.session.add(w)
+                w.balance += tokens
+
+                pack   = TOKEN_PACKS.get(pack_id, {})
+                amount = pack.get("price_cents", 0) / 100
+                db.session.add(Transaction(user_id=user_id, amount_paid=amount, tokens_added=tokens))
+                db.session.commit()
+                print(f"[stripe webhook] user={user_id} +{tokens} token eklendi OK")
+            else:
+                print(f"[stripe webhook] UYARI: metadata boş — session={session_id} meta={meta}")
 
     except Exception as e:
         db.session.rollback()
