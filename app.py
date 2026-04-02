@@ -776,20 +776,15 @@ def stripe_webhook():
         print(f"[stripe webhook] imza/parse hatası: {e}")
         return jsonify({"error": str(e)}), 400
 
-    # 2) Event işleme — tüm mantık tek try/except içinde
+    # 2) Ham payload'ı JSON olarak parse et — SDK typed object sorunlarını bypass eder
     try:
-        event_type = event.get("type", "") if isinstance(event, dict) else getattr(event, "type", "")
+        raw_event  = json.loads(payload)
+        event_type = raw_event.get("type", "")
 
         if event_type == "checkout.session.completed":
-            # Session ID'yi al
-            raw_obj    = event["data"]["object"] if isinstance(event, dict) else event.data.object
-            session_id = raw_obj.get("id", "") if isinstance(raw_obj, dict) else getattr(raw_obj, "id", "")
-
-            # Stripe API'den full session çek — metadata webhook payload'ında eksik gelebilir
-            full_sess = stripe.checkout.Session.retrieve(session_id)
-            raw_meta  = full_sess.get("metadata") if isinstance(full_sess, dict) \
-                        else getattr(full_sess, "metadata", None)
-            meta    = dict(raw_meta) if raw_meta and hasattr(raw_meta, "keys") else {}
+            sess_data  = raw_event["data"]["object"]
+            session_id = sess_data.get("id", "")
+            meta       = sess_data.get("metadata") or {}
 
             user_id = int(meta.get("user_id") or 0)
             tokens  = int(meta.get("tokens")  or 0)
