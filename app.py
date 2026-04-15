@@ -24,6 +24,7 @@ from __future__ import annotations
 import os, sys, traceback, secrets, json
 from datetime import datetime as _dt
 from urllib.parse import urlparse, urljoin
+from itsdangerous import URLSafeTimedSerializer, SignatureExpired, BadSignature
 from sqlalchemy import inspect as db_inspect, func as _func
 from flask import (Flask, render_template, redirect, url_for,
                    flash, request, jsonify, session)
@@ -34,6 +35,7 @@ from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_wtf.csrf import CSRFProtect, generate_csrf
+from flask_mail import Mail, Message
 
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
 BACKEND_DIR = os.path.join(BASE_DIR, "backend")
@@ -102,6 +104,15 @@ app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
     "pool_recycle":  280,
 }
 app.config["WTF_CSRF_TIME_LIMIT"] = 3600   # CSRF token 1 saat geçerli
+
+# ── Flask-Mail ────────────────────────────────────────────────────────────────
+app.config["MAIL_SERVER"]   = os.environ.get("MAIL_SERVER", "")
+app.config["MAIL_PORT"]     = int(os.environ.get("MAIL_PORT", 587))
+app.config["MAIL_USE_TLS"]  = os.environ.get("MAIL_USE_TLS", "true").lower() == "true"
+app.config["MAIL_USERNAME"] = os.environ.get("MAIL_USERNAME", "")
+app.config["MAIL_PASSWORD"] = os.environ.get("MAIL_PASSWORD", "")
+app.config["MAIL_DEFAULT_SENDER"] = os.environ.get("MAIL_DEFAULT_SENDER", "noreply@fintap.app")
+mail = Mail(app)
 
 # ── Cookie güvenliği ────────────────────────────────────────────────────────
 _is_prod = not app.debug
@@ -713,6 +724,62 @@ def api_predict_run():
     })
 
 
+# ── Sentiment API ──────────────────────────────────────────────────────────
+
+@app.route("/api/sentiment/<ticker>")
+@login_required
+@limiter.limit("30 per minute")
+@csrf.exempt
+def api_sentiment(ticker):
+    """Yahoo Finance RSS + VADER sentiment analizi."""
+    if ticker not in VALID_TICKERS:
+        return jsonify({"error": "Geçersiz ticker"}), 400
+    try:
+        import feedparser
+        from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+
+        feed_ticker = ticker.replace("-USD", "")   # BTC-USD → BTC
+        url  = (f"https://feeds.finance.yahoo.com/rss/2.0/headline"
+                f"?s={feed_ticker}&region=US&lang=en-US")
+        feed = feedparser.parse(url)
+
+        analyzer = SentimentIntensityAnalyzer()
+        articles, scores = [], []
+
+        for entry in feed.entries[:8]:
+            title   = (entry.get("title") or "")[:140]
+            summary = (entry.get("summary") or entry.get("description") or "")[:200]
+            text    = f"{title}. {summary}" if summary else title
+            vs      = analyzer.polarity_scores(text)
+            c       = vs["compound"]
+            scores.append(c)
+
+            pub = entry.get("published", "")
+            articles.append({
+                "title":     title,
+                "sentiment": "positive" if c >= 0.05 else ("negative" if c <= -0.05 else "neutral"),
+                "score":     round(c, 3),
+                "published": pub[:16] if pub else "",
+                "link":      entry.get("link", ""),
+            })
+
+        avg = sum(scores) / len(scores) if scores else 0
+        overall = "BULLISH" if avg >= 0.05 else ("BEARISH" if avg <= -0.05 else "NEUTRAL")
+
+        return jsonify({
+            "ticker":   ticker,
+            "overall":  overall,
+            "score":    round(avg, 3),
+            "articles": articles,
+            "count":    len(articles),
+        })
+    except ImportError:
+        return jsonify({"error": "packages_missing"}), 503
+    except Exception as e:
+        print(f"[sentiment] {ticker}: {e}")
+        return jsonify({"error": "unavailable"}), 500
+
+
 # ── Watchlist API ──────────────────────────────────────────────────────────
 
 @app.route("/api/watchlist", methods=["GET"])
@@ -1150,6 +1217,112 @@ def login():
 def logout():
     logout_user()
     return redirect(url_for("login"))
+
+
+# ── Şifre Sıfırlama ───────────────────────────────────────────────────────────
+
+def _reset_serializer():
+    return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="pw-reset-v1")
+
+
+def _send_reset_email(user, reset_url: str):
+    """E-posta gönder. MAIL_SERVER ayarlanmamışsa False döner (dev mode)."""
+    if not app.config.get("MAIL_SERVER"):
+        return False
+    try:
+        msg = Message(
+            subject="Fin-TAP — Şifre Sıfırlama",
+            recipients=[user.email],
+        )
+        msg.body = (
+            f"Merhaba {user.name},\n\n"
+            f"Fin-TAP hesabınız için şifre sıfırlama isteği aldık.\n\n"
+            f"Şifrenizi sıfırlamak için aşağıdaki bağlantıya tıklayın "
+            f"(15 dakika geçerli):\n\n{reset_url}\n\n"
+            f"Bu isteği siz yapmadıysanız bu e-postayı görmezden gelin.\n\n"
+            f"— Fin-TAP Ekibi"
+        )
+        msg.html = (
+            f"<p>Merhaba <b>{user.name}</b>,</p>"
+            f"<p>Şifrenizi sıfırlamak için "
+            f"<a href='{reset_url}'>buraya tıklayın</a> (15 dakika geçerli).</p>"
+            f"<p>Bu isteği siz yapmadıysanız bu e-postayı görmezden gelin.</p>"
+            f"<p>— Fin-TAP Ekibi</p>"
+        )
+        mail.send(msg)
+        return True
+    except Exception as e:
+        print(f"[mail] Gönderim hatası: {e}")
+        return False
+
+
+@app.route("/forgot-password", methods=["GET", "POST"])
+@limiter.limit("5 per hour")
+def forgot_password():
+    if current_user.is_authenticated:
+        return redirect(url_for("root"))
+
+    dev_link = None   # E-posta sunucusu yoksa sayfada gösterilir
+
+    if request.method == "POST":
+        email = (request.form.get("email") or "").strip().lower()
+        user  = User.query.filter_by(email=email).first()
+
+        if user:
+            token     = _reset_serializer().dumps(user.id)
+            reset_url = url_for("reset_password", token=token, _external=True)
+            sent      = _send_reset_email(user, reset_url)
+            if not sent:
+                # Dev mode — bağlantıyı doğrudan göster
+                dev_link = reset_url
+                print(f"[reset] DEV MODE — reset link: {reset_url}")
+
+        # E-posta enumeration'ı önle: her durumda aynı mesaj
+        flash("Kayıtlı bir e-posta girdiyseniz sıfırlama bağlantısı gönderildi.", "success")
+
+    return render_template("forgot_password.html", dev_link=dev_link)
+
+
+@app.route("/reset-password/<token>", methods=["GET", "POST"])
+@limiter.limit("10 per hour")
+def reset_password(token):
+    if current_user.is_authenticated:
+        return redirect(url_for("root"))
+
+    try:
+        user_id = _reset_serializer().loads(token, max_age=900)  # 15 dakika
+    except SignatureExpired:
+        flash("Şifre sıfırlama bağlantısının süresi doldu. Lütfen tekrar isteyin.", "error")
+        return redirect(url_for("forgot_password"))
+    except BadSignature:
+        flash("Geçersiz sıfırlama bağlantısı.", "error")
+        return redirect(url_for("forgot_password"))
+
+    user = db.session.get(User, user_id)
+    if not user:
+        flash("Kullanıcı bulunamadı.", "error")
+        return redirect(url_for("forgot_password"))
+
+    if request.method == "POST":
+        password = request.form.get("password") or ""
+        confirm  = request.form.get("confirm")  or ""
+
+        if password != confirm:
+            flash("Şifreler eşleşmiyor.", "error")
+            return render_template("reset_password.html", token=token)
+
+        ok, msg = _password_strong(password)
+        if not ok:
+            flash(msg, "error")
+            return render_template("reset_password.html", token=token)
+
+        user.password = generate_password_hash(password)
+        db.session.commit()
+        print(f"[reset] user={user.email} şifresini sıfırladı")
+        flash("Şifreniz başarıyla güncellendi. Giriş yapabilirsiniz.", "success")
+        return redirect(url_for("login"))
+
+    return render_template("reset_password.html", token=token)
 
 
 # ── Hata handler'ları ──────────────────────────────────────────────────────

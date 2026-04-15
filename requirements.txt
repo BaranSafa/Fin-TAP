@@ -4,6 +4,7 @@ flask-sqlalchemy
 flask-cors
 flask-limiter
 flask-wtf
+flask-mail
 werkzeug
 gunicorn
 psycopg2-binary
@@ -16,3 +17,5 @@ xgboost
 lightgbm
 requests
 stripe
+feedparser
+vaderSentiment

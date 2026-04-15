@@ -81,6 +81,29 @@
         animation: spin 0.7s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Sentiment widget */
+    .sent-score-bar {
+        height: 6px; background: var(--surface3); border-radius: 3px;
+        overflow: hidden; margin: 10px 16px;
+    }
+    .ssb-fill { height: 100%; border-radius: 3px; transition: width 0.6s ease; }
+    .sent-article {
+        display: flex; align-items: flex-start; gap: 10px;
+        padding: 8px 16px; border-bottom: 1px solid var(--border);
+        font-size: 0.78rem;
+    }
+    .sent-article:last-child { border-bottom: none; }
+    .sent-dot {
+        width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 4px;
+    }
+    .sent-dot.positive { background: var(--green); box-shadow: 0 0 4px rgba(0,230,118,0.5); }
+    .sent-dot.negative { background: var(--red);   box-shadow: 0 0 4px rgba(255,69,96,0.5); }
+    .sent-dot.neutral  { background: var(--text3); }
+    .sent-title { flex: 1; line-height: 1.4; color: var(--text2); }
+    .sent-title a { color: var(--text2); text-decoration: none; }
+    .sent-title a:hover { color: var(--accent); }
+    .sent-time { font-family: var(--mono); font-size: 0.6rem; color: var(--text3); white-space: nowrap; }
 </style>
 
 <div class="config-grid fade-up">
@@ -265,6 +288,22 @@
             </div>
         </div>
 
+        <!-- Sentiment Widget -->
+        <div class="card" id="sentiment-card" style="overflow:hidden;">
+            <div class="card-head" style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
+                <div>
+                    <div class="sec-label" style="margin-bottom:2px;">// NEWS SENTIMENT</div>
+                    <div style="font-weight:800;font-size:0.85rem;">Market Pulse — <span id="sent-ticker">—</span></div>
+                </div>
+                <div id="sent-badge" style="font-family:var(--mono);font-size:0.62rem;font-weight:700;padding:3px 10px;border-radius:4px;letter-spacing:1px;">—</div>
+            </div>
+            <div id="sent-body">
+                <div style="text-align:center;padding:24px;color:var(--text3);font-family:var(--mono);font-size:0.7rem;">
+                    Select a ticker to load sentiment data.
+                </div>
+            </div>
+        </div>
+
         <!-- Empty state -->
         <div id="empty-state" class="card card-pad" style="text-align:center; padding:48px;">
             <div style="font-size:2.5rem; margin-bottom:12px;">🤖</div>
@@ -353,6 +392,82 @@ async function runPrediction() {
         btn.innerHTML = '▶ RUN ANALYSIS (1 TOKEN)';
     }
 }
+
+/* ── Sentiment ── */
+let _lastSentTicker = null;
+
+async function loadSentiment(ticker) {
+    if (ticker === _lastSentTicker) return;
+    _lastSentTicker = ticker;
+
+    document.getElementById('sent-ticker').textContent = ticker;
+    document.getElementById('sent-badge').textContent  = '...';
+    document.getElementById('sent-badge').style.cssText = 'font-family:var(--mono);font-size:0.62rem;font-weight:700;padding:3px 10px;border-radius:4px;letter-spacing:1px;background:var(--surface2);color:var(--text3);';
+    document.getElementById('sent-body').innerHTML =
+        '<div style="text-align:center;padding:20px;color:var(--text3);font-family:var(--mono);font-size:0.7rem;">Loading news...</div>';
+
+    try {
+        const r = await fetch(`/api/sentiment/${encodeURIComponent(ticker)}`);
+        const d = await r.json();
+
+        if (d.error === 'packages_missing') {
+            document.getElementById('sent-body').innerHTML =
+                '<div style="text-align:center;padding:20px;color:var(--text3);font-family:var(--mono);font-size:0.7rem;">Sentiment packages not installed on server.</div>';
+            return;
+        }
+        if (d.error || !d.articles?.length) {
+            document.getElementById('sent-body').innerHTML =
+                '<div style="text-align:center;padding:20px;color:var(--text3);font-family:var(--mono);font-size:0.7rem;">No news data available.</div>';
+            return;
+        }
+
+        /* Badge */
+        const colors = {
+            BULLISH: { bg:'var(--green-dim)', color:'var(--green)', border:'rgba(0,230,118,0.3)' },
+            BEARISH: { bg:'var(--red-dim)',   color:'var(--red)',   border:'rgba(255,69,96,0.3)' },
+            NEUTRAL: { bg:'var(--surface2)',  color:'var(--text2)', border:'var(--border)' },
+        };
+        const c = colors[d.overall] || colors.NEUTRAL;
+        const badge = document.getElementById('sent-badge');
+        badge.textContent = (d.overall === 'BULLISH' ? '▲ ' : d.overall === 'BEARISH' ? '▼ ' : '→ ') + d.overall;
+        badge.style.cssText = `font-family:var(--mono);font-size:0.62rem;font-weight:700;padding:3px 10px;border-radius:4px;letter-spacing:1px;background:${c.bg};color:${c.color};border:1px solid ${c.border};`;
+
+        /* Score bar (map -1..+1 to 0..100%) */
+        const pct  = Math.round((d.score + 1) / 2 * 100);
+        const barColor = d.score >= 0.05 ? 'var(--green)' : d.score <= -0.05 ? 'var(--red)' : 'var(--text3)';
+        const barHtml = `
+            <div style="display:flex;justify-content:space-between;padding:8px 16px 0;font-family:var(--mono);font-size:0.6rem;color:var(--text3);">
+                <span>BEARISH</span>
+                <span>Score: ${d.score > 0 ? '+' : ''}${d.score.toFixed(3)}</span>
+                <span>BULLISH</span>
+            </div>
+            <div class="sent-score-bar">
+                <div class="ssb-fill" style="width:${pct}%;background:${barColor};margin-left:0;"></div>
+            </div>`;
+
+        /* Articles */
+        const artHtml = d.articles.map(a => {
+            const t = a.published ? a.published.replace('T',' ').substring(0,16) : '';
+            const link = a.link ? `<a href="${a.link}" target="_blank" rel="noopener">${a.title}</a>` : a.title;
+            return `<div class="sent-article">
+                <div class="sent-dot ${a.sentiment}"></div>
+                <div class="sent-title">${link}</div>
+                <div class="sent-time">${t}</div>
+            </div>`;
+        }).join('');
+
+        document.getElementById('sent-body').innerHTML = barHtml + artHtml;
+
+    } catch(e) {
+        document.getElementById('sent-body').innerHTML =
+            '<div style="text-align:center;padding:20px;color:var(--text3);font-family:var(--mono);font-size:0.7rem;">Failed to load sentiment.</div>';
+    }
+}
+
+/* Ticker değişince sentiment'ı yenile */
+document.getElementById('ticker-input').addEventListener('change', e => loadSentiment(e.target.value));
+/* İlk yüklemede */
+loadSentiment(document.getElementById('ticker-input').value);
 
 function drawChart(cd, ticker) {
     if (predChart) predChart.destroy();
