@@ -65,6 +65,13 @@ except ImportError as e:
     def get_processed_data(*a, **kw):        return None
     FEATURE_GROUPS = {}
 
+try:
+    from backend.backtester import run_backtest
+    print("[app] Backtester modülü yüklendi OK")
+except ImportError as e:
+    print(f"[app] Backtester import hatası: {e}")
+    def run_backtest(*a, **kw): return None
+
 # Geçerli ticker ve feature group listeleri (input validation için)
 VALID_TICKERS       = set(TICKERS_TO_TRAIN)
 VALID_FEATURE_GROUPS = set(FEATURE_GROUPS.keys()) if FEATURE_GROUPS else {
@@ -1947,6 +1954,52 @@ def _api_auth_required(f):
 
 
 # ── Key yönetim sayfası + CRUD ──────────────────────────────────────────────
+
+@app.route("/backtest")
+@login_required
+def backtest_page():
+    w = get_wallet()
+    return render_template("backtest.html",
+                           trained_stocks=TICKERS_TO_TRAIN,
+                           balance=w.balance,
+                           user=current_user)
+
+
+@app.route("/api/backtest/run", methods=["POST"])
+@login_required
+@limiter.limit("20 per minute")
+@csrf.exempt
+def api_backtest_run():
+    data = request.get_json(silent=True) or {}
+
+    ticker      = (data.get("ticker") or "").strip().upper()
+    horizon     = int(data.get("horizon", 14))
+    lookback    = int(data.get("lookback_days", 365))
+    capital     = float(data.get("start_capital", 1000.0))
+    allow_short = bool(data.get("allow_short", False))
+
+    if not ticker or len(ticker) > 10:
+        return jsonify({"error": "Invalid ticker."}), 400
+    if horizon not in (7, 14, 30, 90):
+        return jsonify({"error": "horizon must be 7, 14, 30 or 90."}), 400
+    if lookback not in (90, 180, 365, 730):
+        return jsonify({"error": "Invalid lookback_days."}), 400
+    if not (100 <= capital <= 1_000_000):
+        return jsonify({"error": "start_capital must be between 100 and 1,000,000."}), 400
+
+    result = run_backtest(
+        ticker=ticker,
+        horizon=horizon,
+        lookback_days=lookback,
+        start_capital=capital,
+        allow_short=allow_short,
+    )
+
+    if result is None:
+        return jsonify({"error": "Insufficient data for this ticker."}), 422
+
+    return jsonify(result)
+
 
 @app.route("/developer")
 @login_required
