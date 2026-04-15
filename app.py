@@ -783,6 +783,105 @@ def api_sentiment(ticker):
         return jsonify({"error": "unavailable"}), 500
 
 
+# ── OHLC / Candlestick API ─────────────────────────────────────────────────
+
+@app.route("/api/ohlc/<ticker>")
+@login_required
+@limiter.limit("60 per minute")
+@csrf.exempt
+def api_ohlc(ticker):
+    """
+    Son 120 günlük OHLCV + teknik göstergeler döndür.
+    Lightweight Charts formatı: {time, open, high, low, close}
+    """
+    if ticker not in VALID_TICKERS:
+        return jsonify({"error": "Geçersiz ticker"}), 400
+
+    try:
+        import numpy as np
+
+        df = get_processed_data(ticker)
+        if df is None or df.empty:
+            return jsonify({"error": "Veri yok"}), 422
+
+        df = df.tail(120).copy()
+        df = df.dropna(subset=["Open", "High", "Low", "Close"])
+
+        closes  = df["Close"].values.astype(float)
+        highs   = df["High"].values.astype(float)
+        lows    = df["Low"].values.astype(float)
+        opens   = df["Open"].values.astype(float)
+        volumes = (df["Volume"].values.astype(float)
+                   if "Volume" in df.columns else [0.0] * len(closes))
+        dates   = [d.strftime("%Y-%m-%d") for d in df.index]
+        n       = len(closes)
+
+        # ── Candles ──
+        candles = [
+            {"time": dates[i], "open": round(float(opens[i]), 4),
+             "high": round(float(highs[i]), 4), "low": round(float(lows[i]), 4),
+             "close": round(float(closes[i]), 4)}
+            for i in range(n)
+        ]
+
+        # ── SMA ──
+        def sma_series(period):
+            out = []
+            for i in range(n):
+                if i + 1 < period:
+                    continue
+                val = float(np.mean(closes[i + 1 - period: i + 1]))
+                out.append({"time": dates[i], "value": round(val, 4)})
+            return out
+
+        sma20 = sma_series(20)
+        sma50 = sma_series(50)
+
+        # ── Bollinger Bands (20, 2σ) ──
+        bb_upper, bb_lower, bb_mid = [], [], []
+        for i in range(19, n):
+            window = closes[i - 19: i + 1]
+            mid    = float(np.mean(window))
+            std    = float(np.std(window, ddof=1))
+            bb_mid.append({"time": dates[i],   "value": round(mid, 4)})
+            bb_upper.append({"time": dates[i], "value": round(mid + 2 * std, 4)})
+            bb_lower.append({"time": dates[i], "value": round(mid - 2 * std, 4)})
+
+        # ── RSI(14) ──
+        rsi_series = []
+        for i in range(14, n):
+            diffs  = np.diff(closes[i - 14: i + 1])
+            gains  = np.where(diffs > 0, diffs, 0.0)
+            losses = np.where(diffs < 0, -diffs, 0.0)
+            avg_g  = float(np.mean(gains))
+            avg_l  = float(np.mean(losses)) if np.any(losses) else 1e-9
+            rsi_val = 100 - 100 / (1 + avg_g / avg_l)
+            rsi_series.append({"time": dates[i], "value": round(rsi_val, 2)})
+
+        # ── Volume (normalised for bar chart) ──
+        vol_series = [
+            {"time": dates[i], "value": int(volumes[i]),
+             "color": "rgba(0,230,118,0.4)" if closes[i] >= opens[i] else "rgba(255,69,96,0.4)"}
+            for i in range(n)
+        ]
+
+        return jsonify({
+            "ticker":   ticker,
+            "candles":  candles,
+            "sma20":    sma20,
+            "sma50":    sma50,
+            "bb_upper": bb_upper,
+            "bb_lower": bb_lower,
+            "bb_mid":   bb_mid,
+            "rsi":      rsi_series,
+            "volume":   vol_series,
+        })
+
+    except Exception as e:
+        print(f"[ohlc] {ticker}: {e}")
+        return jsonify({"error": "unavailable"}), 500
+
+
 # ── Watchlist API ──────────────────────────────────────────────────────────
 
 @app.route("/api/watchlist", methods=["GET"])

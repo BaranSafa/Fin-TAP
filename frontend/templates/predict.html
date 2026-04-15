@@ -117,6 +117,41 @@
     .sent-title a { color: var(--text2); text-decoration: none; }
     .sent-title a:hover { color: var(--accent); }
     .sent-time { font-family: var(--mono); font-size: 0.6rem; color: var(--text3); white-space: nowrap; }
+
+    /* ── Candlestick chart ── */
+    .ind-toggle {
+        display: inline-flex; align-items: center; gap: 5px;
+        padding: 4px 10px; border-radius: 5px;
+        border: 1px solid var(--border);
+        background: var(--surface2);
+        font-family: var(--mono); font-size: 0.6rem; font-weight: 700;
+        color: var(--text3); cursor: pointer; transition: all 0.15s;
+        letter-spacing: 0.5px;
+    }
+    .ind-toggle.on { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+    .ind-toggle .dot { width: 7px; height: 7px; border-radius: 50%; }
+    #candle-chart-wrap { position: relative; }
+    #candle-chart { width: 100%; height: 260px; }
+    #rsi-chart    { width: 100%; height: 90px; }
+    .chart-divider {
+        display: flex; align-items: center; gap: 10px;
+        padding: 4px 16px;
+        font-family: var(--mono); font-size: 0.58rem; color: var(--text3);
+        letter-spacing: 1px;
+    }
+    .chart-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+    #candle-loading {
+        position: absolute; inset: 0;
+        display: flex; align-items: center; justify-content: center;
+        background: var(--surface); border-radius: 0 0 12px 12px;
+        font-family: var(--mono); font-size: 0.68rem; color: var(--text3); gap: 8px;
+    }
+    .mini-spin {
+        width: 14px; height: 14px;
+        border: 2px solid var(--border2); border-top-color: var(--accent);
+        border-radius: 50%; animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 
 <div class="config-grid fade-up">
@@ -311,6 +346,35 @@
                     <div style="display:flex; align-items:center; gap:6px;">
                         <div style="width:16px; height:2px; background:var(--amber); border-radius:1px; border-top: 2px dashed var(--amber); height:0;"></div> Model Prediction
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Market Chart (Candlestick + Indicators) -->
+        <div class="card" id="market-chart-card" style="overflow:hidden;">
+            <div style="padding:10px 16px 8px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+                <div>
+                    <div class="sec-label" style="margin-bottom:2px;">// MARKET CHART</div>
+                    <div style="font-weight:800; font-size:0.85rem;" id="candle-ticker-title">—</div>
+                </div>
+                <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                    <button class="ind-toggle on" id="tog-sma20" onclick="toggleIndicator('sma20')">
+                        <span class="dot" style="background:#00d4ff;"></span> SMA20
+                    </button>
+                    <button class="ind-toggle on" id="tog-sma50" onclick="toggleIndicator('sma50')">
+                        <span class="dot" style="background:#ffa726;"></span> SMA50
+                    </button>
+                    <button class="ind-toggle" id="tog-bb" onclick="toggleIndicator('bb')">
+                        <span class="dot" style="background:#7c5cfc;"></span> Bollinger
+                    </button>
+                </div>
+            </div>
+            <div id="candle-chart-wrap" style="position:relative;">
+                <div id="candle-chart"></div>
+                <div class="chart-divider">RSI (14)</div>
+                <div id="rsi-chart"></div>
+                <div id="candle-loading">
+                    <span class="mini-spin"></span> Loading chart…
                 </div>
             </div>
         </div>
@@ -512,10 +576,152 @@ async function loadSentiment(ticker) {
     }
 }
 
-/* Ticker değişince sentiment'ı yenile */
-document.getElementById('ticker-input').addEventListener('change', e => loadSentiment(e.target.value));
+/* Ticker değişince sentiment + chart yenile */
+document.getElementById('ticker-input').addEventListener('change', e => {
+    loadSentiment(e.target.value);
+    loadCandleChart(e.target.value);
+});
 /* İlk yüklemede */
 loadSentiment(document.getElementById('ticker-input').value);
+loadCandleChart(document.getElementById('ticker-input').value);
+
+/* ── Candlestick + Indicator Chart ── */
+let _candleChart = null, _rsiChart = null;
+let _series = {};   // keyed by indicator name
+let _indState = { sma20: true, sma50: true, bb: false };
+let _lastCandleTicker = null;
+let _ohlcData = null;
+
+const CHART_COLORS = {
+    sma20: '#00d4ff',
+    sma50: '#ffa726',
+    bb:    '#7c5cfc',
+};
+
+function _destroyCharts() {
+    if (_candleChart) { _candleChart.remove(); _candleChart = null; }
+    if (_rsiChart)    { _rsiChart.remove();    _rsiChart = null; }
+    _series = {};
+}
+
+function _buildCharts(data) {
+    _destroyCharts();
+    _ohlcData = data;
+
+    const chartOpts = {
+        layout:     { background: { color: '#0f1318' }, textColor: '#4a5568' },
+        grid:       { vertLines: { color: '#1e2530' }, horzLines: { color: '#1e2530' } },
+        crosshair:  { mode: 1 },
+        rightPriceScale: { borderColor: '#1e2530' },
+        timeScale:  { borderColor: '#1e2530', timeVisible: true, secondsVisible: false },
+        handleScroll: true, handleScale: true,
+    };
+
+    /* Main chart */
+    _candleChart = LightweightCharts.createChart(document.getElementById('candle-chart'), {
+        ...chartOpts, height: 260,
+    });
+
+    const candleSeries = _candleChart.addCandlestickSeries({
+        upColor:        '#00e676', downColor: '#ff4560',
+        borderUpColor:  '#00e676', borderDownColor: '#ff4560',
+        wickUpColor:    '#00e676', wickDownColor: '#ff4560',
+    });
+    candleSeries.setData(data.candles);
+    _series.candle = candleSeries;
+
+    /* Volume (histogram) */
+    const volSeries = _candleChart.addHistogramSeries({
+        priceFormat:   { type: 'volume' },
+        priceScaleId:  'vol',
+        scaleMargins:  { top: 0.85, bottom: 0 },
+    });
+    volSeries.setData(data.volume);
+    _series.volume = volSeries;
+
+    /* SMA20 */
+    _series.sma20 = _candleChart.addLineSeries({ color: CHART_COLORS.sma20, lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+    _series.sma20.setData(data.sma20);
+    _series.sma20.applyOptions({ visible: _indState.sma20 });
+
+    /* SMA50 */
+    _series.sma50 = _candleChart.addLineSeries({ color: CHART_COLORS.sma50, lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+    _series.sma50.setData(data.sma50);
+    _series.sma50.applyOptions({ visible: _indState.sma50 });
+
+    /* Bollinger Bands */
+    _series.bb_upper = _candleChart.addLineSeries({ color: CHART_COLORS.bb, lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
+    _series.bb_upper.setData(data.bb_upper);
+    _series.bb_upper.applyOptions({ visible: _indState.bb });
+
+    _series.bb_lower = _candleChart.addLineSeries({ color: CHART_COLORS.bb, lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
+    _series.bb_lower.setData(data.bb_lower);
+    _series.bb_lower.applyOptions({ visible: _indState.bb });
+
+    _series.bb_mid = _candleChart.addLineSeries({ color: `${CHART_COLORS.bb}80`, lineWidth: 1, lineStyle: 1, priceLineVisible: false, lastValueVisible: false });
+    _series.bb_mid.setData(data.bb_mid);
+    _series.bb_mid.applyOptions({ visible: _indState.bb });
+
+    /* RSI chart */
+    _rsiChart = LightweightCharts.createChart(document.getElementById('rsi-chart'), {
+        ...chartOpts, height: 90,
+        rightPriceScale: { ...chartOpts.rightPriceScale, scaleMargins: { top: 0.1, bottom: 0.1 } },
+    });
+
+    const rsiSeries = _rsiChart.addLineSeries({ color: '#b47cff', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: true });
+    rsiSeries.setData(data.rsi);
+    _series.rsi = rsiSeries;
+
+    /* Overbought / oversold reference lines */
+    rsiSeries.createPriceLine({ price: 70, color: 'rgba(255,69,96,0.4)',   lineWidth: 1, lineStyle: 1, axisLabelVisible: false });
+    rsiSeries.createPriceLine({ price: 30, color: 'rgba(0,230,118,0.4)',   lineWidth: 1, lineStyle: 1, axisLabelVisible: false });
+    rsiSeries.createPriceLine({ price: 50, color: 'rgba(136,150,171,0.2)', lineWidth: 1, lineStyle: 2, axisLabelVisible: false });
+
+    /* Sync time range */
+    _candleChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+        if (range) _rsiChart.timeScale().setVisibleLogicalRange(range);
+    });
+    _rsiChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+        if (range) _candleChart.timeScale().setVisibleLogicalRange(range);
+    });
+
+    _candleChart.timeScale().fitContent();
+    _rsiChart.timeScale().fitContent();
+}
+
+function toggleIndicator(name) {
+    _indState[name] = !_indState[name];
+    const btn = document.getElementById(`tog-${name}`);
+    btn.classList.toggle('on', _indState[name]);
+
+    if (!_series[name] && name !== 'bb') return;
+    if (name === 'bb') {
+        ['bb_upper', 'bb_lower', 'bb_mid'].forEach(k => {
+            if (_series[k]) _series[k].applyOptions({ visible: _indState.bb });
+        });
+    } else {
+        if (_series[name]) _series[name].applyOptions({ visible: _indState[name] });
+    }
+}
+
+async function loadCandleChart(ticker) {
+    if (ticker === _lastCandleTicker) return;
+    _lastCandleTicker = ticker;
+    document.getElementById('candle-ticker-title').textContent = ticker;
+    document.getElementById('candle-loading').style.display = 'flex';
+
+    try {
+        const r = await fetch(`/api/ohlc/${encodeURIComponent(ticker)}`);
+        const d = await r.json();
+        if (d.error) throw new Error(d.error);
+        _buildCharts(d);
+    } catch(e) {
+        document.getElementById('candle-loading').innerHTML =
+            `<span style="color:var(--text3);font-family:var(--mono);font-size:0.68rem;">Chart unavailable</span>`;
+        return;
+    }
+    document.getElementById('candle-loading').style.display = 'none';
+}
 
 function drawChart(cd, ticker) {
     if (predChart) predChart.destroy();
