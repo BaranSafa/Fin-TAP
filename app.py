@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os, sys, traceback, secrets, json
 from datetime import datetime as _dt
+from urllib.parse import urlparse, urljoin
 from sqlalchemy import inspect as db_inspect, func as _func
 from flask import (Flask, render_template, redirect, url_for,
                    flash, request, jsonify, session)
@@ -102,6 +103,12 @@ app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
 }
 app.config["WTF_CSRF_TIME_LIMIT"] = 3600   # CSRF token 1 saat geçerli
 
+# ── Cookie güvenliği ────────────────────────────────────────────────────────
+_is_prod = not app.debug
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"]   = _is_prod   # HTTPS zorunlu prod'da
+
 # ── CORS ──────────────────────────────────────────────────────────────────
 _allowed_origins = os.environ.get("ALLOWED_ORIGINS", "*")
 if _allowed_origins == "*":
@@ -147,7 +154,26 @@ with app.app_context():
 # ── CSRF token'ı her response'a ekle (JS fetch için) ──────────────────────
 @app.after_request
 def inject_csrf_token(response):
-    response.set_cookie("csrf_token", generate_csrf())
+    response.set_cookie(
+        "csrf_token", generate_csrf(),
+        httponly=False,          # JS okunabilir olmalı
+        samesite="Strict",
+        secure=_is_prod,
+    )
+    return response
+
+
+# ── Güvenlik başlıkları ───────────────────────────────────────────────────
+@app.after_request
+def set_security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("X-XSS-Protection", "1; mode=block")
+    if _is_prod:
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
     return response
 
 
@@ -161,11 +187,50 @@ def get_wallet():
 
 
 def _admin_check() -> bool:
-    """Admin secret kontrolü — /db-test ve /db-kur için."""
+    """
+    /db-test ve /db-kur için ADMIN_SECRET kontrolü.
+    ADMIN_SECRET ayarlanmamışsa erişim reddedilir (güvenli default).
+    Secret, URL query param yerine X-Admin-Secret header'ından okunur.
+    """
     admin_secret = os.environ.get("ADMIN_SECRET", "")
     if not admin_secret:
-        return True  # Env var ayarlanmamışsa geliştirme modunda izin ver
-    return request.args.get("secret", "") == admin_secret
+        return False   # Hiç env var yoksa reddet — asla dev mode'da açma
+    # Header öncelikli; URL query param de desteklenir (CLI kolaylığı için)
+    provided = (request.headers.get("X-Admin-Secret", "")
+                or request.args.get("secret", ""))
+    return secrets.compare_digest(provided, admin_secret)
+
+
+def _is_admin() -> bool:
+    """
+    /admin rotası için: kullanıcı giriş yapmış olmalı VE
+    ADMIN_EMAIL env var'ında e-postası bulunmalı.
+    ADMIN_EMAIL ayarlanmamışsa ADMIN_SECRET header fallback'i kullanılır.
+    """
+    if not current_user.is_authenticated:
+        return False
+    admin_emails_raw = os.environ.get("ADMIN_EMAIL", "")
+    if admin_emails_raw:
+        admin_emails = {e.strip().lower() for e in admin_emails_raw.split(",") if e.strip()}
+        return current_user.email.lower() in admin_emails
+    # Fallback: ADMIN_SECRET header
+    admin_secret = os.environ.get("ADMIN_SECRET", "")
+    if not admin_secret:
+        return False
+    provided = request.headers.get("X-Admin-Secret", "") or request.args.get("secret", "")
+    return secrets.compare_digest(provided, admin_secret)
+
+
+def _is_safe_redirect_url(url: str) -> bool:
+    """Open redirect koruması: URL aynı host'a mı işaret ediyor?"""
+    if not url:
+        return False
+    try:
+        ref  = urlparse(request.host_url)
+        test = urlparse(urljoin(request.host_url, url))
+        return test.scheme in ("http", "https") and ref.netloc == test.netloc
+    except Exception:
+        return False
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -200,13 +265,17 @@ def api_cache_status():
 @login_required
 @limiter.limit("10 per hour")
 def api_cache_clear():
+    if not _is_admin():
+        return jsonify({"error": "Yetkisiz erişim"}), 403
     ticker = request.args.get("ticker")
+    if ticker and ticker not in VALID_TICKERS:
+        return jsonify({"error": "Geçersiz ticker"}), 400
     try:
         from backend.data_manager import cache_clear
         cache_clear(ticker)
         return jsonify({"status": "ok", "cleared": ticker or "all"})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "İşlem başarısız"}), 500
 
 
 @app.route("/api/refresh")
@@ -219,7 +288,7 @@ def api_refresh():
     secret   = request.args.get("secret", "")
     expected = os.environ.get("CRON_SECRET", "")
 
-    if expected and secret != expected:
+    if not expected or not secrets.compare_digest(secret, expected):
         return jsonify({"error": "unauthorized"}), 401
 
     results = {"refreshed": [], "failed": [], "skipped": []}
@@ -416,9 +485,10 @@ def portfolio():
 
 
 @app.route("/admin")
+@login_required
 def admin_panel():
-    """Admin dashboard — ADMIN_SECRET ile korumalı."""
-    if not _admin_check():
+    """Admin dashboard — giriş yapmış + ADMIN_EMAIL/ADMIN_SECRET yetkisi zorunlu."""
+    if not _is_admin():
         return redirect(url_for("root"))
     try:
         user_count  = db.session.query(_func.count(User.id)).scalar() or 0
@@ -694,6 +764,10 @@ def api_watchlist_add():
     if existing:
         return jsonify({"status": "already_exists", "symbol": symbol})
 
+    wl_count = Watchlist.query.filter_by(user_id=current_user.id).count()
+    if wl_count >= 30:
+        return jsonify({"error": "Takip listesi en fazla 30 enstrüman içerebilir."}), 400
+
     item = Watchlist(user_id=current_user.id, symbol=symbol)
     db.session.add(item)
     try:
@@ -831,7 +905,7 @@ def api_create_checkout():
     except Exception as e:
         print(f"[stripe] checkout session hatası: {e}")
         traceback.print_exc()
-        return jsonify({"error": str(e)[:300]}), 500
+        return jsonify({"error": "Ödeme başlatılamadı. Lütfen tekrar deneyin."}), 500
 
 
 @app.route("/api/payment/create-subscription", methods=["POST"])
@@ -880,7 +954,7 @@ def api_create_subscription():
     except Exception as e:
         print(f"[stripe] subscription session hatası: {e}")
         traceback.print_exc()
-        return jsonify({"error": str(e)[:300]}), 500
+        return jsonify({"error": "Abonelik başlatılamadı. Lütfen tekrar deneyin."}), 500
 
 
 @app.route("/api/payment/webhook", methods=["POST"])
@@ -1018,6 +1092,13 @@ def register():
             flash("Tüm alanları doldurun.", "error")
             return redirect(url_for("register"))
 
+        if len(email) > 254:
+            flash("Geçersiz e-posta adresi.", "error")
+            return redirect(url_for("register"))
+        if len(name) > 100:
+            flash("İsim en fazla 100 karakter olabilir.", "error")
+            return redirect(url_for("register"))
+
         ok, msg = _password_strong(password)
         if not ok:
             flash(msg, "error")
@@ -1058,7 +1139,8 @@ def login():
         user     = User.query.filter_by(email=email).first()
         if user and check_password_hash(user.password, password):
             login_user(user)
-            return redirect(request.args.get("next") or url_for("root"))
+            next_url = request.args.get("next", "")
+            return redirect(next_url if _is_safe_redirect_url(next_url) else url_for("root"))
         flash("Hatalı e-posta veya şifre.", "error")
     return render_template("login.html")
 
@@ -1095,7 +1177,7 @@ def e500(e):
 def unhandled(e):
     print(f"[unhandled exception] {e}"); traceback.print_exc()
     if request.path.startswith("/api/"):
-        return jsonify({"error": str(e)[:200]}), 500
+        return jsonify({"error": "Sunucu hatası. Lütfen tekrar deneyin."}), 500
     return "<h3>Beklenmeyen hata. Lütfen tekrar deneyin.</h3>", 500
 
 
