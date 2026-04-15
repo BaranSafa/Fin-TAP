@@ -33,6 +33,17 @@
     .sc-arrow  { color: var(--text3); font-size: 0.8rem; transition: all 0.15s; }
     .stock-card:hover .sc-arrow { color: var(--accent); transform: translateX(3px); }
 
+    .wl-btn {
+        position: absolute; top: 8px; right: 8px;
+        background: none; border: none; cursor: pointer;
+        font-size: 0.85rem; line-height: 1; padding: 2px;
+        opacity: 0.4; transition: all 0.15s;
+        z-index: 2;
+    }
+    .wl-btn:hover { opacity: 1; transform: scale(1.2); }
+    .wl-btn.in-wl { opacity: 1; }
+    .stock-card:hover .wl-btn { opacity: 0.7; }
+
     .search-wrap { position: relative; margin-bottom: 16px; }
     .search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text3); font-size: 0.85rem; }
     #search-input {
@@ -59,13 +70,22 @@
     <!-- Grid -->
     <div id="stocks-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
         {% for t in stocks %}
-        <a href="/predict?ticker={{ t }}" class="stock-card" data-ticker="{{ t }}">
-            <div>
-                <div class="sc-ticker">{{ t }}</div>
-                <div class="sc-idx">{% if '-USD' in t %}CRYPTO{% else %}NASDAQ{% endif %}</div>
-            </div>
-            <span class="sc-arrow">→</span>
-        </a>
+        {% set in_wl = t in watchlist_symbols %}
+        <div class="stock-card" data-ticker="{{ t }}" style="cursor:default;">
+            <button class="wl-btn {% if in_wl %}in-wl{% endif %}"
+                    id="wl-btn-{{ t }}"
+                    onclick="toggleWatchlist(event, '{{ t }}')"
+                    title="{% if in_wl %}Remove from watchlist{% else %}Add to watchlist{% endif %}">
+                {% if in_wl %}⭐{% else %}☆{% endif %}
+            </button>
+            <a href="/predict?ticker={{ t }}" style="text-decoration:none;display:flex;align-items:center;justify-content:space-between;width:100%;">
+                <div>
+                    <div class="sc-ticker">{{ t }}</div>
+                    <div class="sc-idx">{% if '-USD' in t %}CRYPTO{% else %}NASDAQ{% endif %}</div>
+                </div>
+                <span class="sc-arrow">→</span>
+            </a>
+        </div>
         {% endfor %}
     </div>
 
@@ -93,6 +113,39 @@ function filterStocks() {
 
     document.getElementById('showing-count').textContent = visible;
     document.getElementById('no-results').style.display  = visible === 0 ? 'block' : 'none';
+}
+
+async function toggleWatchlist(event, sym) {
+    event.stopPropagation();
+    const btn = document.getElementById(`wl-btn-${sym}`);
+    const inWl = btn.classList.contains('in-wl');
+
+    btn.style.opacity = '0.4';
+    try {
+        if (inWl) {
+            const r = await fetch(`/api/watchlist/${sym}`, { method: 'DELETE' });
+            const d = await r.json();
+            if (d.error) throw new Error(d.error);
+            btn.textContent = '☆';
+            btn.classList.remove('in-wl');
+            btn.title = 'Add to watchlist';
+        } else {
+            const r = await fetch('/api/watchlist', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ symbol: sym })
+            });
+            const d = await r.json();
+            if (d.error) throw new Error(d.error);
+            btn.textContent = '⭐';
+            btn.classList.add('in-wl');
+            btn.title = 'Remove from watchlist';
+        }
+    } catch(e) {
+        console.error(e);
+    } finally {
+        btn.style.opacity = '';
+    }
 }
 </script>
 {% endblock %}

@@ -119,6 +119,16 @@
                 <span class="ir-val c-accent">{{ predictions|length }}</span>
             </div>
             <div class="info-row">
+                <span class="ir-key">Scored Predictions</span>
+                <span class="ir-val c-purple">{{ scored_count }}</span>
+            </div>
+            <div class="info-row">
+                <span class="ir-key">Avg Accuracy</span>
+                <span class="ir-val {% if avg_accuracy and avg_accuracy >= 80 %}c-green{% elif avg_accuracy %}c-amber{% else %}c-dim{% endif %}">
+                    {% if avg_accuracy %}{{ avg_accuracy }}%{% else %}—{% endif %}
+                </span>
+            </div>
+            <div class="info-row">
                 <span class="ir-key">Total Purchases</span>
                 <span class="ir-val c-green">{{ transactions|length }}</span>
             </div>
@@ -126,6 +136,19 @@
                 <span class="ir-key">Plan</span>
                 <span class="ir-val">FREE</span>
             </div>
+        </div>
+
+        <!-- Accuracy Update -->
+        <div class="card card-pad">
+            <div class="sec-label">// PREDICTION ACCURACY</div>
+            <p style="font-size:0.78rem;color:var(--text2);margin-bottom:12px;line-height:1.5;">
+                Predictions older than 14 days are automatically scored by comparing the forecasted price to the actual closing price.
+            </p>
+            <button id="acc-btn" onclick="updateAccuracy()"
+                class="btn btn-ghost" style="width:100%;justify-content:center;">
+                📊 Update Accuracy Scores
+            </button>
+            <div id="acc-result" style="display:none;margin-top:10px;font-family:var(--mono);font-size:0.72rem;color:var(--green);text-align:center;"></div>
         </div>
     </div>
 
@@ -149,7 +172,8 @@
                         <th>DATE</th>
                         <th>SYMBOL</th>
                         <th>MODEL</th>
-                        <th>RESULT</th>
+                        <th>14D TARGET</th>
+                        <th>ACCURACY</th>
                         <th>ACTION</th>
                     </tr>
                 </thead>
@@ -164,6 +188,15 @@
                             </span>
                         </td>
                         <td class="mono" style="color:var(--green); font-size:0.82rem;">{{ p.predicted_result }}</td>
+                        <td class="mono" style="font-size:0.82rem;">
+                            {% if p.accuracy_pct is not none %}
+                                <span style="color:{% if p.accuracy_pct >= 90 %}var(--green){% elif p.accuracy_pct >= 75 %}var(--amber){% else %}var(--red){% endif %}; font-weight:700;">
+                                    {{ p.accuracy_pct }}%
+                                </span>
+                            {% else %}
+                                <span style="color:var(--text3); font-size:0.7rem;">PENDING</span>
+                            {% endif %}
+                        </td>
                         <td>
                             <a href="/predict?ticker={{ p.symbol }}" style="font-family:var(--mono); font-size:0.65rem; color:var(--accent); text-decoration:none; letter-spacing:1px;">
                                 RE-RUN →
@@ -232,6 +265,28 @@ function switchTab(btn, tabId) {
     document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById(tabId).classList.add('active');
+}
+
+async function updateAccuracy() {
+    const btn = document.getElementById('acc-btn');
+    const res_div = document.getElementById('acc-result');
+    btn.disabled = true;
+    btn.textContent = '⏳ Updating...';
+    try {
+        const r = await fetch('/api/accuracy/update');
+        const d = await r.json();
+        if (d.error) throw new Error(d.error);
+        res_div.textContent = `✓ ${d.updated} predictions scored${d.errors ? ', ' + d.errors + ' errors' : ''}. Refresh to see results.`;
+        res_div.style.display = 'block';
+        if (d.updated > 0) setTimeout(() => location.reload(), 1500);
+    } catch(e) {
+        res_div.textContent = '⚠ ' + e.message;
+        res_div.style.color = 'var(--red)';
+        res_div.style.display = 'block';
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '📊 Update Accuracy Scores';
+    }
 }
 </script>
 {% endblock %}

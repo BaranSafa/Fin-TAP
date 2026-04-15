@@ -75,6 +75,15 @@
     }
     .chart-select:focus { border-color: var(--accent); }
     .chart-select option { background: var(--surface2); }
+
+    .spill {
+        background: var(--surface2); border: 1px solid var(--border);
+        color: var(--text2); border-radius: 4px;
+        padding: 3px 8px; font-family: var(--mono); font-size: 0.62rem;
+        font-weight: 700; cursor: pointer; transition: all 0.12s;
+    }
+    .spill:hover { border-color: var(--accent); color: var(--accent); }
+    .spill-active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
 </style>
 
 <!-- MARKET CARDS -->
@@ -94,7 +103,7 @@
 
     <!-- CHART CARD -->
     <div class="card card-pad">
-        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
             <div>
                 <div class="sec-label" style="margin-bottom:4px;">// PRICE HISTORY · LAST 100 DAYS</div>
                 <div style="font-size:0.9rem; font-weight:700;">
@@ -102,20 +111,38 @@
                     <span class="c-muted"> Performance</span>
                 </div>
             </div>
-            <select id="ticker-select" class="chart-select">
-                <optgroup label="── STOCKS ──">
-                {% for t in stocks %}{% if '-USD' not in t %}
-                <option value="{{ t }}">{{ t }}</option>
-                {% endif %}{% endfor %}
-                </optgroup>
-                <optgroup label="── CRYPTO ──">
-                {% for t in stocks %}{% if '-USD' in t %}
-                <option value="{{ t }}">{{ t }}</option>
-                {% endif %}{% endfor %}
-                </optgroup>
-            </select>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <input id="stock-search" type="text" placeholder="Search ticker…"
+                    style="background:var(--surface2);border:1px solid var(--border);color:var(--text);
+                           padding:5px 10px;border-radius:6px;font-family:var(--mono);font-size:0.72rem;
+                           outline:none;width:120px;transition:border-color 0.2s;"
+                    oninput="filterPills(this.value)"
+                    onfocus="this.style.borderColor='var(--accent)'"
+                    onblur="this.style.borderColor='var(--border)'">
+                <select id="ticker-select" class="chart-select">
+                    <optgroup label="── STOCKS ──">
+                    {% for t in stocks %}{% if '-USD' not in t %}
+                    <option value="{{ t }}">{{ t }}</option>
+                    {% endif %}{% endfor %}
+                    </optgroup>
+                    <optgroup label="── CRYPTO ──">
+                    {% for t in stocks %}{% if '-USD' in t %}
+                    <option value="{{ t }}">{{ t }}</option>
+                    {% endif %}{% endfor %}
+                    </optgroup>
+                </select>
+            </div>
         </div>
-        <div style="position:relative; height:260px;">
+
+        <!-- Quick-pick stock pills -->
+        <div id="stock-pills" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px;">
+            {% for t in stocks %}
+            <button class="spill {% if t == 'AAPL' %}spill-active{% endif %}"
+                    data-ticker="{{ t }}" onclick="changeChart('{{ t }}')">{{ t }}</button>
+            {% endfor %}
+        </div>
+
+        <div style="position:relative; height:240px;">
             <canvas id="mainChart"></canvas>
         </div>
         <div id="chart-meta" style="display:flex; gap:24px; margin-top:14px; padding-top:14px; border-top:1px solid var(--border);">
@@ -134,6 +161,13 @@
             <div>
                 <div class="sec-label" style="margin-bottom:3px;">CHANGE</div>
                 <div id="c-change" class="mono" style="font-size:0.9rem; font-weight:700;">—</div>
+            </div>
+            <div style="margin-left:auto;">
+                <a id="forecast-btn" href="/predict?ticker=AAPL"
+                   style="display:inline-flex;align-items:center;gap:6px;background:var(--accent);color:#000;
+                          font-weight:800;font-size:0.75rem;padding:6px 14px;border-radius:6px;text-decoration:none;">
+                    🤖 Forecast →
+                </a>
             </div>
         </div>
     </div>
@@ -289,8 +323,25 @@
         } catch(e) { console.error(e); }
     }
 
-    window.changeChart = (t) => { selEl.value = t; loadChart(t); };
-    selEl.addEventListener('change', e => loadChart(e.target.value));
+    window.changeChart = (t) => {
+        selEl.value = t;
+        // Update active pill
+        document.querySelectorAll('.spill').forEach(b => {
+            b.classList.toggle('spill-active', b.dataset.ticker === t);
+        });
+        // Update forecast button href
+        const fb = document.getElementById('forecast-btn');
+        if (fb) fb.href = `/predict?ticker=${t}`;
+        loadChart(t);
+    };
+    selEl.addEventListener('change', e => changeChart(e.target.value));
+
+    window.filterPills = (q) => {
+        q = q.toUpperCase().trim();
+        document.querySelectorAll('.spill').forEach(b => {
+            b.style.display = (!q || b.dataset.ticker.includes(q)) ? '' : 'none';
+        });
+    };
 
     loadCards();
     loadChart(selEl.value || 'AAPL');

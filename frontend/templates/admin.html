@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin — Fin-TAP</title>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg:#07090d; --surface:#0f1318; --surface2:#141920; --surface3:#1a2030;
+            --border:#1e2530; --border2:#2a3344;
+            --accent:#00d4ff; --accent-dim:rgba(0,212,255,0.07);
+            --green:#00e676; --green-dim:rgba(0,230,118,0.07);
+            --red:#ff4560; --red-dim:rgba(255,69,96,0.07);
+            --amber:#ffa726; --amber-dim:rgba(255,167,38,0.07);
+            --purple:#7c5cfc; --purple-dim:rgba(124,92,252,0.07);
+            --text:#dde3ee; --text2:#8896ab; --text3:#4a5568;
+            --mono:'Space Mono',monospace; --sans:'Syne',sans-serif;
+        }
+        *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+        body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:100vh;padding:0;}
+        body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(0,212,255,0.02) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,255,0.02) 1px,transparent 1px);background-size:48px 48px;pointer-events:none;z-index:0;}
+        ::-webkit-scrollbar{width:4px;} ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
+
+        .topbar {
+            position:sticky;top:0;z-index:100;background:rgba(15,19,24,0.95);
+            backdrop-filter:blur(20px);border-bottom:1px solid var(--border);
+            padding:0 32px;height:56px;display:flex;align-items:center;
+            justify-content:space-between;
+        }
+        .tb-logo{font-family:var(--mono);font-size:0.85rem;font-weight:700;color:var(--red);letter-spacing:3px;}
+        .tb-badge{background:var(--red-dim);border:1px solid rgba(255,69,96,0.3);color:var(--red);
+                  font-family:var(--mono);font-size:0.6rem;padding:3px 10px;border-radius:4px;font-weight:700;letter-spacing:1px;}
+        .tb-back{color:var(--accent);text-decoration:none;font-family:var(--mono);font-size:0.72rem;}
+        .tb-back:hover{text-decoration:underline;}
+
+        .content{position:relative;z-index:1;padding:28px 32px;max-width:1300px;margin:0 auto;}
+
+        .kpi-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:24px;}
+        .kpi{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;}
+        .kpi-label{font-family:var(--mono);font-size:0.55rem;letter-spacing:2px;color:var(--text3);text-transform:uppercase;margin-bottom:8px;}
+        .kpi-val{font-family:var(--mono);font-size:1.8rem;font-weight:700;margin-bottom:4px;}
+        .kpi-sub{font-size:0.72rem;color:var(--text2);}
+
+        .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;}
+        .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;}
+        .card-head{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;}
+        .ch-title{font-weight:800;font-size:0.88rem;}
+        .sec-label{font-family:var(--mono);font-size:0.55rem;letter-spacing:3px;color:var(--text3);text-transform:uppercase;}
+
+        .ft-table{width:100%;border-collapse:collapse;font-size:0.82rem;}
+        .ft-table thead tr{border-bottom:1px solid var(--border2);}
+        .ft-table th{text-align:left;padding:10px 16px;font-family:var(--mono);font-size:0.56rem;letter-spacing:2px;color:var(--text3);font-weight:400;text-transform:uppercase;}
+        .ft-table td{padding:11px 16px;border-bottom:1px solid var(--border);}
+        .ft-table tbody tr:hover{background:var(--surface2);}
+        .ft-table tbody tr:last-child td{border-bottom:none;}
+
+        .badge{display:inline-flex;align-items:center;gap:4px;font-family:var(--mono);font-size:0.6rem;font-weight:700;letter-spacing:1px;padding:2px 8px;border-radius:3px;}
+        .b-accent{background:var(--accent-dim);color:var(--accent);border:1px solid rgba(0,212,255,0.2);}
+        .b-green{background:var(--green-dim);color:var(--green);border:1px solid rgba(0,230,118,0.2);}
+        .b-red{background:var(--red-dim);color:var(--red);border:1px solid rgba(255,69,96,0.2);}
+        .b-amber{background:var(--amber-dim);color:var(--amber);border:1px solid rgba(255,167,38,0.2);}
+        .b-purple{background:var(--purple-dim);color:var(--purple);border:1px solid rgba(124,92,252,0.2);}
+
+        .stat-row{display:flex;justify-content:space-between;align-items:center;padding:10px 20px;border-bottom:1px solid var(--border);font-size:0.82rem;}
+        .stat-row:last-child{border-bottom:none;}
+        .sr-key{color:var(--text2);}
+        .sr-val{font-family:var(--mono);font-size:0.78rem;font-weight:700;}
+
+        .mono{font-family:var(--mono);}
+        .c-accent{color:var(--accent);} .c-green{color:var(--green);} .c-red{color:var(--red);}
+        .c-amber{color:var(--amber);} .c-purple{color:var(--purple);} .c-dim{color:var(--text3);}
+
+        .progress-bar{height:6px;background:var(--surface3);border-radius:3px;overflow:hidden;margin-top:4px;}
+        .pb-fill{height:100%;border-radius:3px;background:linear-gradient(90deg,var(--accent),var(--purple));}
+    </style>
+</head>
+<body>
+
+<div class="topbar">
+    <div style="display:flex;align-items:center;gap:14px;">
+        <div class="tb-logo">▲ FIN-TAP</div>
+        <div class="tb-badge">🔒 ADMIN PANEL</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:16px;">
+        <span style="font-family:var(--mono);font-size:0.65rem;color:var(--text3);">
+            Last updated: <span id="last-upd">{{ now if now else '—' }}</span>
+        </span>
+        <a href="/" class="tb-back">← Back to App</a>
+    </div>
+</div>
+
+<div class="content">
+
+    <!-- KPIs -->
+    <div class="kpi-grid">
+        <div class="kpi">
+            <div class="kpi-label">Total Users</div>
+            <div class="kpi-val c-accent">{{ user_count }}</div>
+            <div class="kpi-sub">Registered accounts</div>
+        </div>
+        <div class="kpi">
+            <div class="kpi-label">Total Predictions</div>
+            <div class="kpi-val c-purple">{{ pred_count }}</div>
+            <div class="kpi-sub">All time</div>
+        </div>
+        <div class="kpi">
+            <div class="kpi-label">Predictions Today</div>
+            <div class="kpi-val c-amber">{{ preds_today }}</div>
+            <div class="kpi-sub">Since midnight UTC</div>
+        </div>
+        <div class="kpi">
+            <div class="kpi-label">Total Revenue</div>
+            <div class="kpi-val c-green">${{ '%.2f'|format(revenue) }}</div>
+            <div class="kpi-sub">Stripe payments</div>
+        </div>
+        <div class="kpi">
+            <div class="kpi-label">Tokens Sold</div>
+            <div class="kpi-val" style="color:var(--amber);">{{ token_sales }}</div>
+            <div class="kpi-sub">Total token packs</div>
+        </div>
+    </div>
+
+    <div class="grid-2">
+
+        <!-- Recent Predictions -->
+        <div class="card">
+            <div class="card-head">
+                <div>
+                    <div class="sec-label" style="margin-bottom:3px;">// RECENT ACTIVITY</div>
+                    <div class="ch-title">Latest Predictions</div>
+                </div>
+                <span class="badge b-accent">Last 20</span>
+            </div>
+            <table class="ft-table">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>User</th>
+                        <th>Symbol</th>
+                        <th>Model</th>
+                        <th>Result</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in recent_preds %}
+                    <tr>
+                        <td class="mono c-dim" style="font-size:0.7rem;">{{ p.created_at.strftime('%m-%d %H:%M') }}</td>
+                        <td style="font-size:0.78rem;">
+                            {% if p.user %}
+                                <span style="color:var(--text2);">{{ p.user.name[:16] }}</span>
+                            {% else %}
+                                <span class="c-dim">—</span>
+                            {% endif %}
+                        </td>
+                        <td><span class="badge b-accent">{{ p.symbol }}</span></td>
+                        <td style="font-size:0.72rem;color:var(--text2);">{{ p.model_type }}</td>
+                        <td class="mono" style="color:var(--green);font-size:0.78rem;">{{ p.predicted_result }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="5" style="text-align:center;padding:32px;color:var(--text3);">No predictions yet.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Top Users -->
+        <div class="card">
+            <div class="card-head">
+                <div>
+                    <div class="sec-label" style="margin-bottom:3px;">// USER ANALYTICS</div>
+                    <div class="ch-title">Most Active Users</div>
+                </div>
+                <span class="badge b-purple">Top 10</span>
+            </div>
+            <table class="ft-table">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Predictions</th>
+                        <th>Joined</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for user, pc in top_users %}
+                    <tr>
+                        <td class="mono c-dim" style="font-size:0.75rem;">{{ loop.index }}</td>
+                        <td style="font-size:0.82rem;font-weight:700;">{{ user.name[:20] }}</td>
+                        <td class="mono c-dim" style="font-size:0.7rem;">{{ user.email[:24] }}</td>
+                        <td>
+                            <span class="badge b-purple">{{ pc }}</span>
+                        </td>
+                        <td class="mono c-dim" style="font-size:0.7rem;">{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else '—' }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="5" style="text-align:center;padding:32px;color:var(--text3);">No users yet.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Cache Status + System -->
+    <div class="grid-2">
+        <div class="card">
+            <div class="card-head">
+                <div>
+                    <div class="sec-label" style="margin-bottom:3px;">// DATA LAYER</div>
+                    <div class="ch-title">In-Memory Cache Status</div>
+                </div>
+                <span class="badge b-green">{{ cache_info|length }} cached</span>
+            </div>
+            {% if cache_info %}
+            <table class="ft-table">
+                <thead>
+                    <tr><th>Ticker</th><th>Age (min)</th><th>Rows</th><th>Last Date</th><th>Status</th></tr>
+                </thead>
+                <tbody>
+                    {% for ticker, info in cache_info.items() %}
+                    <tr>
+                        <td><span class="badge b-accent">{{ ticker }}</span></td>
+                        <td class="mono" style="font-size:0.78rem;">{{ info.age_min }}</td>
+                        <td class="mono" style="font-size:0.78rem;color:var(--text2);">{{ info.rows }}</td>
+                        <td class="mono" style="font-size:0.7rem;color:var(--text3);">{{ info.last_date }}</td>
+                        <td>
+                            {% if info.fresh %}
+                            <span class="badge b-green">FRESH</span>
+                            {% else %}
+                            <span class="badge b-amber">STALE</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div style="text-align:center;padding:32px;color:var(--text3);font-family:var(--mono);font-size:0.75rem;">
+                No data cached yet. First prediction will populate the cache.
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="card">
+            <div class="card-head">
+                <div>
+                    <div class="sec-label" style="margin-bottom:3px;">// SYSTEM INFO</div>
+                    <div class="ch-title">Platform Status</div>
+                </div>
+                <span class="badge b-green">● ONLINE</span>
+            </div>
+            <div class="stat-row">
+                <span class="sr-key">Platform Version</span>
+                <span class="sr-val c-accent">v2.1</span>
+            </div>
+            <div class="stat-row">
+                <span class="sr-key">Total Revenue</span>
+                <span class="sr-val c-green">${{ '%.2f'|format(revenue) }}</span>
+            </div>
+            <div class="stat-row">
+                <span class="sr-key">Avg Revenue / User</span>
+                <span class="sr-val c-amber">
+                    ${{ '%.2f'|format(revenue / user_count) if user_count else '0.00' }}
+                </span>
+            </div>
+            <div class="stat-row">
+                <span class="sr-key">Predictions / User</span>
+                <span class="sr-val c-purple">
+                    {{ '%.1f'|format(pred_count / user_count) if user_count else '0.0' }}
+                </span>
+            </div>
+            <div class="stat-row">
+                <span class="sr-key">Cache Entries</span>
+                <span class="sr-val">{{ cache_info|length }}</span>
+            </div>
+            <div class="stat-row">
+                <span class="sr-key">Admin Access</span>
+                <span class="sr-val c-red">SECRET PROTECTED</span>
+            </div>
+            <div class="stat-row">
+                <span class="sr-key">DB Type</span>
+                <span class="sr-val">
+                    {% if 'postgresql' in config.get('SQLALCHEMY_DATABASE_URI', '') %}
+                    <span class="c-green">PostgreSQL</span>
+                    {% else %}
+                    <span class="c-amber">SQLite (local)</span>
+                    {% endif %}
+                </span>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+document.getElementById('last-upd').textContent = new Date().toLocaleString('en-US', {
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+});
+</script>
+</body>
+</html>

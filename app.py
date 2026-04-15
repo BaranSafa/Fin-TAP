@@ -22,7 +22,8 @@ V0.7 Güncellemeleri:
 from __future__ import annotations
 
 import os, sys, traceback, secrets, json
-from sqlalchemy import inspect as db_inspect
+from datetime import datetime as _dt
+from sqlalchemy import inspect as db_inspect, func as _func
 from flask import (Flask, render_template, redirect, url_for,
                    flash, request, jsonify, session)
 from flask_login import (LoginManager, login_user, login_required,
@@ -368,8 +369,9 @@ def compare():
 @login_required
 def all_stocks():
     w = get_wallet()
+    wl_symbols = {item.symbol for item in Watchlist.query.filter_by(user_id=current_user.id).all()}
     return render_template("all_stocks.html", user=current_user,
-                           balance=w.balance, stocks=TICKERS_TO_TRAIN)
+                           balance=w.balance, stocks=TICKERS_TO_TRAIN, watchlist_symbols=wl_symbols)
 
 
 @app.route("/roadmap")
@@ -394,8 +396,58 @@ def profile():
                      .order_by(Transaction.date.desc()).limit(50).all()
     prs = Prediction.query.filter_by(user_id=current_user.id)\
                     .order_by(Prediction.created_at.desc()).limit(100).all()
+    # Accuracy stats
+    scored = [p for p in prs if p.accuracy_pct is not None]
+    avg_acc = round(sum(p.accuracy_pct for p in scored) / len(scored), 1) if scored else None
     return render_template("profile.html", user=current_user, wallet=w,
-                           balance=w.balance, transactions=txs, predictions=prs)
+                           balance=w.balance, transactions=txs, predictions=prs,
+                           avg_accuracy=avg_acc, scored_count=len(scored))
+
+
+@app.route("/portfolio")
+@login_required
+def portfolio():
+    w = get_wallet()
+    items = Watchlist.query.filter_by(user_id=current_user.id)\
+                    .order_by(Watchlist.added_at.desc()).all()
+    return render_template("portfolio.html", user=current_user,
+                           balance=w.balance, watchlist=items,
+                           all_stocks=TICKERS_TO_TRAIN)
+
+
+@app.route("/admin")
+def admin_panel():
+    """Admin dashboard — ADMIN_SECRET ile korumalı."""
+    if not _admin_check():
+        return redirect(url_for("root"))
+    try:
+        user_count  = db.session.query(_func.count(User.id)).scalar() or 0
+        pred_count  = db.session.query(_func.count(Prediction.id)).scalar() or 0
+        revenue     = db.session.query(_func.sum(Transaction.amount_paid)).scalar() or 0
+        token_sales = db.session.query(_func.sum(Transaction.tokens_added)).scalar() or 0
+        today       = _dt.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        preds_today = Prediction.query.filter(Prediction.created_at >= today).count()
+        recent_preds = (Prediction.query
+                        .order_by(Prediction.created_at.desc()).limit(20).all())
+        top_users    = (db.session.query(User, _func.count(Prediction.id).label("pc"))
+                        .outerjoin(Prediction, User.id == Prediction.user_id)
+                        .group_by(User.id)
+                        .order_by(_func.count(Prediction.id).desc())
+                        .limit(10).all())
+        try:
+            from backend.data_manager import cache_status
+            cache_info = cache_status()
+        except Exception:
+            cache_info = {}
+    except Exception as e:
+        traceback.print_exc()
+        return f"<pre>Admin panel hatası: {e}</pre>", 500
+
+    return render_template("admin.html",
+        user_count=user_count, pred_count=pred_count,
+        revenue=round(float(revenue), 2), token_sales=int(token_sales),
+        preds_today=preds_today, recent_preds=recent_preds,
+        top_users=top_users, cache_info=cache_info)
 
 
 # ══════════════════════════════════════════════════════════════════════════
