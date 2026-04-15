@@ -1361,6 +1361,89 @@ def api_paper_reset():
     return jsonify({"status": "reset", "cash": PAPER_STARTING_CASH})
 
 
+# ── Correlation Matrix API ─────────────────────────────────────────────────
+
+@app.route("/correlation")
+@login_required
+def correlation_page():
+    w = get_wallet()
+    return render_template("correlation.html",
+                           trained_stocks=TICKERS_TO_TRAIN,
+                           balance=w.balance,
+                           user=current_user)
+
+
+@app.route("/api/correlation")
+@login_required
+@limiter.limit("10 per minute")
+@csrf.exempt
+def api_correlation():
+    """
+    Seçilen ticker'lar için günlük log-return korelasyon matrisini döndür.
+    Query params:
+      tickers : virgülle ayrılmış semboller (max 20)
+      days    : lookback (30 | 90 | 180 | 365)
+    """
+    import numpy as np
+
+    raw_tickers = request.args.get("tickers", "")
+    days        = int(request.args.get("days", 90))
+
+    if days not in (30, 90, 180, 365):
+        days = 90
+
+    tickers = [t.strip().upper() for t in raw_tickers.split(",") if t.strip()]
+    tickers = [t for t in tickers if t in VALID_TICKERS][:20]
+
+    if len(tickers) < 2:
+        return jsonify({"error": "En az 2 geçerli ticker seçin."}), 400
+
+    # ── Her ticker için günlük log-return serisi çek ─────────────────────
+    returns_map: dict[str, np.ndarray] = {}
+    for ticker in tickers:
+        try:
+            df = get_processed_data(ticker)
+            if df is None or df.empty:
+                continue
+            closes = df["Close"].tail(days + 1).values.astype(float)
+            if len(closes) < 10:
+                continue
+            log_ret = np.diff(np.log(closes))
+            returns_map[ticker] = log_ret
+        except Exception as e:
+            print(f"[corr] {ticker}: {e}")
+
+    valid = list(returns_map.keys())
+    if len(valid) < 2:
+        return jsonify({"error": "Yeterli veri bulunamadı."}), 422
+
+    # Ortak uzunluğa kırp (en kısa seriyi baz al)
+    min_len = min(len(v) for v in returns_map.values())
+    matrix_data = np.array([returns_map[t][-min_len:] for t in valid])  # shape: (n_tickers, min_len)
+
+    # Pearson korelasyon matrisi
+    corr = np.corrcoef(matrix_data)
+
+    # ── Özet istatistikler (en yüksek / en düşük korelasyon çifti) ──────
+    pairs = []
+    n = len(valid)
+    for i in range(n):
+        for j in range(i + 1, n):
+            pairs.append({
+                "a": valid[i], "b": valid[j],
+                "r": round(float(corr[i, j]), 4)
+            })
+    pairs.sort(key=lambda x: x["r"], reverse=True)
+
+    return jsonify({
+        "tickers":  valid,
+        "matrix":   [[round(float(corr[i][j]), 4) for j in range(n)] for i in range(n)],
+        "days":     min_len,
+        "top_pos":  pairs[:3],           # en güçlü pozitif korelasyon
+        "top_neg":  pairs[-3:][::-1],    # en güçlü negatif korelasyon
+    })
+
+
 # ── Prediction Accuracy API ────────────────────────────────────────────────
 
 @app.route("/api/accuracy/update")
