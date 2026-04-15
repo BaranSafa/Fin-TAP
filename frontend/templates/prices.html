@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Pricing — Fin-TAP{% endblock %}
 {% block header_title %}Pricing & Plans{% endblock %}
-{% block header_sub %}SIMPLE · TRANSPARENT · PAY-PER-PREDICTION{% endblock %}
+{% block header_sub %}SIMPLE · TRANSPARENT · PAY-PER-PREDICTION OR MONTHLY SUBSCRIPTION{% endblock %}
 
 {% block content %}
 <style>
@@ -47,8 +47,8 @@
 <div style="text-align:center; margin-bottom:36px;" class="fade-up">
     <div class="sec-label" style="text-align:center;">// SUBSCRIPTION PLANS</div>
     <div style="font-size:1.5rem; font-weight:800; margin-bottom:8px;">Find Your Plan</div>
-    <div style="color:var(--text2); font-size:0.88rem; max-width:480px; margin:0 auto;">
-        Fin-TAP runs on a token economy. Each AI prediction costs 1 token. Start free, upgrade anytime.
+    <div style="color:var(--text2); font-size:0.88rem; max-width:520px; margin:0 auto;">
+        Fin-TAP runs on a token economy. Each AI prediction costs 1 token. Buy one-time packs or subscribe monthly — start free, upgrade anytime.
     </div>
 </div>
 
@@ -75,33 +75,39 @@
         <div class="hot-tag">MOST POPULAR</div>
         <div class="plan-label">// PRO</div>
         <div class="plan-name" style="color:var(--accent);">Professional</div>
-        <div class="plan-desc">Unlimited predictions with all advanced ML models and crypto.</div>
+        <div class="plan-desc">200 tokens every month — all advanced ML models and crypto unlocked.</div>
         <div class="plan-price">$15 <span>/ month</span></div>
         <ul class="plan-features">
-            <li><span class="pf-check">✓</span> Unlimited tokens</li>
+            <li><span class="pf-check">✓</span> 200 tokens / month</li>
             <li><span class="pf-check">✓</span> All stocks + all crypto</li>
             <li><span class="pf-check">✓</span> All 7 ML models incl. LSTM</li>
             <li><span class="pf-check">✓</span> Priority data refresh</li>
             <li><span class="pf-check">✓</span> Favorites portfolio</li>
             <li><span class="pf-check">✓</span> Prediction accuracy history</li>
         </ul>
-        <div class="btn btn-ghost" style="text-align:center; justify-content:center; display:flex; opacity:0.5; cursor:not-allowed; font-family:var(--mono); font-size:0.72rem;">COMING APR 2026</div>
+        <button class="pack-buy-btn" id="sub-pro-btn" onclick="subscribePlan('pro_monthly', this)"
+                style="font-size:0.72rem; letter-spacing:1px;">
+            SUBSCRIBE $15/MO →
+        </button>
     </div>
 
     <div class="price-card">
         <div class="plan-label">// ENTERPRISE</div>
         <div class="plan-name">Enterprise</div>
-        <div class="plan-desc">API access and white-label deployment for institutional teams.</div>
-        <div class="plan-price" style="font-size:1.5rem; line-height:3rem;">Contact Us</div>
+        <div class="plan-desc">999 tokens monthly plus API access and white-label deployment for teams.</div>
+        <div class="plan-price">$49.99 <span>/ month</span></div>
         <ul class="plan-features">
-            <li><span class="pf-check">✓</span> Everything in Pro</li>
+            <li><span class="pf-check">✓</span> 999 tokens / month</li>
             <li><span class="pf-check">✓</span> Direct prediction API</li>
             <li><span class="pf-check">✓</span> Custom model training</li>
             <li><span class="pf-check">✓</span> SLA & priority support</li>
             <li><span class="pf-check">✓</span> White-label UI</li>
             <li><span class="pf-check">✓</span> Multi-seat accounts</li>
         </ul>
-        <div class="btn btn-ghost" style="text-align:center; justify-content:center; display:flex; opacity:0.5; cursor:not-allowed; font-family:var(--mono); font-size:0.72rem;">COMING JUN 2026</div>
+        <button class="pack-buy-btn" id="sub-ent-btn" onclick="subscribePlan('enterprise_monthly', this)"
+                style="font-size:0.72rem; letter-spacing:1px; background:var(--purple);">
+            SUBSCRIBE $49.99/MO →
+        </button>
     </div>
 
 </div>
@@ -177,6 +183,7 @@
 {% block scripts %}
 <script>
 async function buyPack(packId, btn) {
+    const orig = btn.textContent;
     btn.disabled = true;
     btn.textContent = 'PROCESSING…';
     try {
@@ -190,13 +197,34 @@ async function buyPack(packId, btn) {
             window.location.href = data.url;
         } else {
             alert(data.error || 'Ödeme başlatılamadı. Lütfen tekrar deneyin.');
-            btn.disabled = false;
-            btn.textContent = 'BUY NOW →';
+            btn.disabled = false; btn.textContent = orig;
         }
     } catch (e) {
         alert('Bağlantı hatası. Lütfen tekrar deneyin.');
-        btn.disabled = false;
-        btn.textContent = 'BUY NOW →';
+        btn.disabled = false; btn.textContent = orig;
+    }
+}
+
+async function subscribePlan(planId, btn) {
+    const orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'PROCESSING…';
+    try {
+        const res  = await fetch('/api/payment/create-subscription', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ plan: planId }),
+        });
+        const data = await res.json();
+        if (data.url) {
+            window.location.href = data.url;
+        } else {
+            alert(data.error || 'Abonelik başlatılamadı. Lütfen tekrar deneyin.');
+            btn.disabled = false; btn.textContent = orig;
+        }
+    } catch (e) {
+        alert('Bağlantı hatası. Lütfen tekrar deneyin.');
+        btn.disabled = false; btn.textContent = orig;
     }
 }
 </script>

@@ -551,6 +551,23 @@ TOKEN_PACKS = {
     "whale":    {"tokens": 500, "price_cents": 3999, "name": "Whale Pack    (500 Tokens)"},
 }
 
+SUBSCRIPTION_PLANS = {
+    "pro_monthly": {
+        "name":        "Fin-TAP Professional (Monthly)",
+        "price_cents": 1500,
+        "tokens":      200,   # tokens added on each billing cycle
+        "interval":    "month",
+        "label":       "Pro Monthly",
+    },
+    "enterprise_monthly": {
+        "name":        "Fin-TAP Enterprise (Monthly)",
+        "price_cents": 4999,
+        "tokens":      999,
+        "interval":    "month",
+        "label":       "Enterprise Monthly",
+    },
+}
+
 try:
     import stripe as _stripe_lib
     _stripe_key = os.environ.get("STRIPE_SECRET_KEY", "")
@@ -817,6 +834,55 @@ def api_create_checkout():
         return jsonify({"error": str(e)[:300]}), 500
 
 
+@app.route("/api/payment/create-subscription", methods=["POST"])
+@login_required
+@limiter.limit("10 per hour")
+@csrf.exempt
+def api_create_subscription():
+    """Stripe Subscription Checkout oturumu oluştur (aylık abonelik)."""
+    if not _stripe_ok:
+        return jsonify({"error": "Ödeme sistemi henüz aktif değil. STRIPE_SECRET_KEY env var'ı ayarlanmamış."}), 503
+
+    payload = request.get_json(silent=True) or {}
+    plan_id = payload.get("plan", "")
+
+    if plan_id not in SUBSCRIPTION_PLANS:
+        return jsonify({"error": "Geçersiz abonelik planı."}), 400
+
+    plan     = SUBSCRIPTION_PLANS[plan_id]
+    base_url = request.host_url.rstrip("/")
+    success_url = f"{base_url}/payment/success?session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url  = f"{base_url}/prices"
+
+    try:
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            line_items=[{
+                "price_data": {
+                    "currency":    "usd",
+                    "unit_amount": plan["price_cents"],
+                    "product_data": {"name": plan["name"]},
+                    "recurring":   {"interval": plan["interval"]},
+                },
+                "quantity": 1,
+            }],
+            mode="subscription",
+            success_url=success_url,
+            cancel_url=cancel_url,
+            metadata={
+                "user_id": str(current_user.id),
+                "plan_id": plan_id,
+                "tokens":  str(plan["tokens"]),
+            },
+        )
+        print(f"[stripe] subscription session oluşturuldu: user={current_user.id} plan={plan_id}")
+        return jsonify({"url": session.url})
+    except Exception as e:
+        print(f"[stripe] subscription session hatası: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)[:300]}), 500
+
+
 @app.route("/api/payment/webhook", methods=["POST"])
 @csrf.exempt
 def stripe_webhook():
@@ -851,12 +917,14 @@ def stripe_webhook():
             sess_data  = raw_event["data"]["object"]
             session_id = sess_data.get("id", "")
             meta       = sess_data.get("metadata") or {}
+            mode       = sess_data.get("mode", "payment")
 
             user_id = int(meta.get("user_id") or 0)
             tokens  = int(meta.get("tokens")  or 0)
             pack_id = str(meta.get("pack_id") or "")
+            plan_id = str(meta.get("plan_id") or "")
 
-            print(f"[stripe webhook] session={session_id} user={user_id} tokens={tokens} pack={pack_id}")
+            print(f"[stripe webhook] session={session_id} mode={mode} user={user_id} tokens={tokens}")
 
             if user_id and tokens:
                 w = Wallet.query.filter_by(user_id=user_id).first()
@@ -865,13 +933,42 @@ def stripe_webhook():
                     db.session.add(w)
                 w.balance += tokens
 
-                pack   = TOKEN_PACKS.get(pack_id, {})
-                amount = pack.get("price_cents", 0) / 100
+                if mode == "subscription":
+                    plan   = SUBSCRIPTION_PLANS.get(plan_id, {})
+                    amount = plan.get("price_cents", 0) / 100
+                else:
+                    pack   = TOKEN_PACKS.get(pack_id, {})
+                    amount = pack.get("price_cents", 0) / 100
+
                 db.session.add(Transaction(user_id=user_id, amount_paid=amount, tokens_added=tokens))
                 db.session.commit()
-                print(f"[stripe webhook] user={user_id} +{tokens} token eklendi OK")
+                print(f"[stripe webhook] user={user_id} +{tokens} token eklendi OK (mode={mode})")
             else:
                 print(f"[stripe webhook] UYARI: metadata boş — session={session_id} meta={meta}")
+
+        elif event_type == "invoice.payment_succeeded":
+            # Aylık yenileme — subscription renewal token yükleme
+            invoice   = raw_event["data"]["object"]
+            billing   = invoice.get("billing_reason", "")
+            # Sadece subscription_cycle (yenileme) olaylarını işle; ilk ödeme checkout.session.completed ile halledildi
+            if billing == "subscription_cycle":
+                sub_id = invoice.get("subscription", "")
+                try:
+                    sub    = stripe.Subscription.retrieve(sub_id)
+                    meta   = sub.get("metadata") or {}
+                    user_id = int(meta.get("user_id") or 0)
+                    plan_id = str(meta.get("plan_id") or "")
+                    tokens  = int(meta.get("tokens")  or 0)
+                    amount  = (invoice.get("amount_paid") or 0) / 100
+                    if user_id and tokens:
+                        w = Wallet.query.filter_by(user_id=user_id).first()
+                        if w:
+                            w.balance += tokens
+                            db.session.add(Transaction(user_id=user_id, amount_paid=amount, tokens_added=tokens))
+                            db.session.commit()
+                            print(f"[stripe webhook] yenileme: user={user_id} +{tokens} token (plan={plan_id})")
+                except Exception as sub_err:
+                    print(f"[stripe webhook] subscription renewal hatası: {sub_err}")
 
     except Exception as e:
         db.session.rollback()
