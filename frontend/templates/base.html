@@ -509,6 +509,15 @@
             <span class="ni">⭐</span> Portfolio
         </a>
 
+        <div class="nav-section-label" style="margin-top:12px;">TOOLS</div>
+
+        <a href="/alerts" class="nav-item {% if request.endpoint == 'alerts_page' %}active{% endif %}">
+            <span class="ni">🔔</span> Price Alerts
+        </a>
+        <a href="/backtest" class="nav-item {% if request.endpoint == 'backtest_page' %}active{% endif %}">
+            <span class="ni">📈</span> Backtester
+        </a>
+
         <div class="nav-section-label" style="margin-top:12px;">PLATFORM</div>
 
         <a href="/prices" class="nav-item {% if request.endpoint == 'prices' %}active{% endif %}">

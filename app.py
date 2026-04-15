@@ -42,7 +42,7 @@ BACKEND_DIR = os.path.join(BASE_DIR, "backend")
 sys.path.insert(0, BACKEND_DIR)
 sys.path.insert(0, BASE_DIR)
 
-from models import db, User, Wallet, Transaction, Prediction, Watchlist
+from models import db, User, Wallet, Transaction, Prediction, Watchlist, PriceAlert
 
 # ── Backend ────────────────────────────────────────────────────────────────
 try:
@@ -967,6 +967,193 @@ def api_watchlist_remove(symbol):
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
     return jsonify({"status": "removed", "symbol": symbol})
+
+
+# ── Price Alerts API ───────────────────────────────────────────────────────
+
+MAX_ALERTS_PER_USER = 20
+
+
+@app.route("/alerts")
+@login_required
+def alerts_page():
+    w = get_wallet()
+    return render_template("alerts.html",
+                           trained_stocks=TICKERS_TO_TRAIN,
+                           balance=w.balance,
+                           user=current_user)
+
+
+@app.route("/api/alerts", methods=["GET"])
+@login_required
+@limiter.limit("60 per minute")
+@csrf.exempt
+def api_alerts_list():
+    alerts = (PriceAlert.query
+              .filter_by(user_id=current_user.id)
+              .order_by(PriceAlert.created_at.desc())
+              .all())
+    result = []
+    for a in alerts:
+        result.append({
+            "id":           a.id,
+            "symbol":       a.symbol,
+            "target_price": a.target_price,
+            "direction":    a.direction,
+            "note":         a.note or "",
+            "status":       a.status,
+            "created_at":   a.created_at.strftime("%Y-%m-%d %H:%M"),
+            "triggered_at": a.triggered_at.strftime("%Y-%m-%d %H:%M") if a.triggered_at else None,
+        })
+    return jsonify(result)
+
+
+@app.route("/api/alerts", methods=["POST"])
+@login_required
+@limiter.limit("30 per hour")
+@csrf.exempt
+def api_alerts_create():
+    payload      = request.get_json(silent=True) or {}
+    symbol       = str(payload.get("symbol", "")).upper().strip()
+    direction    = str(payload.get("direction", "")).lower().strip()
+    target_price = payload.get("target_price")
+    note         = str(payload.get("note", ""))[:200].strip()
+
+    if symbol not in VALID_TICKERS:
+        return jsonify({"error": "Geçersiz ticker."}), 400
+    if direction not in ("above", "below"):
+        return jsonify({"error": "direction 'above' veya 'below' olmalı."}), 400
+    try:
+        target_price = float(target_price)
+        if target_price <= 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return jsonify({"error": "Geçersiz hedef fiyat."}), 400
+
+    active_count = PriceAlert.query.filter_by(
+        user_id=current_user.id, status="active"
+    ).count()
+    if active_count >= MAX_ALERTS_PER_USER:
+        return jsonify({"error": f"En fazla {MAX_ALERTS_PER_USER} aktif alarm oluşturabilirsiniz."}), 400
+
+    alert = PriceAlert(
+        user_id=current_user.id,
+        symbol=symbol,
+        target_price=round(target_price, 6),
+        direction=direction,
+        note=note or None,
+        status="active",
+    )
+    db.session.add(alert)
+    db.session.commit()
+    return jsonify({"status": "created", "id": alert.id}), 201
+
+
+@app.route("/api/alerts/<int:alert_id>", methods=["DELETE"])
+@login_required
+@limiter.limit("30 per hour")
+@csrf.exempt
+def api_alerts_delete(alert_id):
+    alert = PriceAlert.query.filter_by(
+        id=alert_id, user_id=current_user.id
+    ).first_or_404()
+    db.session.delete(alert)
+    db.session.commit()
+    return jsonify({"status": "deleted"})
+
+
+@app.route("/api/alerts/<int:alert_id>/cancel", methods=["POST"])
+@login_required
+@limiter.limit("30 per hour")
+@csrf.exempt
+def api_alerts_cancel(alert_id):
+    alert = PriceAlert.query.filter_by(
+        id=alert_id, user_id=current_user.id
+    ).first_or_404()
+    alert.status = "cancelled"
+    db.session.commit()
+    return jsonify({"status": "cancelled"})
+
+
+@app.route("/api/alerts/check")
+@csrf.exempt
+def api_alerts_check():
+    """
+    Cron endpoint: aktif alarmları kontrol et, tetiklenenlere email gönder.
+    CRON_SECRET header ile korunur.
+    Render Cron Job: GET /api/alerts/check  (her 15 dakikada bir)
+    """
+    expected = os.environ.get("CRON_SECRET", "")
+    if not expected:
+        return jsonify({"error": "CRON_SECRET not configured"}), 503
+
+    provided = request.headers.get("X-Cron-Secret", "") or request.args.get("secret", "")
+    if not secrets.compare_digest(expected, provided):
+        return jsonify({"error": "Unauthorized"}), 401
+
+    active_alerts = PriceAlert.query.filter_by(status="active").all()
+    if not active_alerts:
+        return jsonify({"checked": 0, "triggered": 0})
+
+    # Fiyatları sembol bazında bir kez çek
+    price_cache: dict[str, float] = {}
+    for alert in active_alerts:
+        if alert.symbol not in price_cache:
+            try:
+                df = get_processed_data(alert.symbol)
+                if df is not None and not df.empty:
+                    price_cache[alert.symbol] = float(df["Close"].iloc[-1])
+            except Exception:
+                pass
+
+    triggered_count = 0
+    for alert in active_alerts:
+        current_price = price_cache.get(alert.symbol)
+        if current_price is None:
+            continue
+
+        fired = (
+            (alert.direction == "above" and current_price >= alert.target_price) or
+            (alert.direction == "below" and current_price <= alert.target_price)
+        )
+        if not fired:
+            continue
+
+        # Tetiklendi — status güncelle
+        alert.status       = "triggered"
+        alert.triggered_at = _dt.utcnow()
+        triggered_count   += 1
+
+        # Email gönder
+        try:
+            user = db.session.get(User, alert.user_id)
+            if user and app.config.get("MAIL_SERVER"):
+                direction_word = "risen above" if alert.direction == "above" else "fallen below"
+                subject = f"[Fin-TAP] Price Alert: {alert.symbol} {direction_word} ${alert.target_price:,.2f}"
+                body = (
+                    f"Hi {user.name},\n\n"
+                    f"Your price alert for {alert.symbol} has been triggered.\n\n"
+                    f"  Alert:         {alert.symbol} {direction_word} ${alert.target_price:,.2f}\n"
+                    f"  Current Price: ${current_price:,.2f}\n"
+                )
+                if alert.note:
+                    body += f"  Your note:     {alert.note}\n"
+                body += (
+                    f"\n  Triggered at:  {alert.triggered_at.strftime('%Y-%m-%d %H:%M UTC')}\n\n"
+                    f"Log in to Fin-TAP to manage your alerts.\n\n"
+                    f"— Fin-TAP Team\n"
+                )
+                msg = Message(subject=subject, recipients=[user.email], body=body)
+                mail.send(msg)
+                print(f"[alerts] Email gönderildi → {user.email} ({alert.symbol})")
+            else:
+                print(f"[alerts] MAIL_SERVER yok — alarm tetiklendi ama email gönderilmedi: {alert.symbol}")
+        except Exception as e:
+            print(f"[alerts] Email hatası: {e}")
+
+    db.session.commit()
+    print(f"[alerts] Check tamamlandı: {len(active_alerts)} kontrol, {triggered_count} tetiklendi")
+    return jsonify({"checked": len(active_alerts), "triggered": triggered_count})
 
 
 # ── Prediction Accuracy API ────────────────────────────────────────────────

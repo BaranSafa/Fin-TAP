@@ -33,6 +33,7 @@ class User(UserMixin, db.Model):
     transactions = db.relationship("Transaction", backref="user", lazy=True)
     predictions  = db.relationship("Prediction",  backref="user", lazy=True)
     watchlist    = db.relationship("Watchlist",   backref="user", lazy=True)
+    price_alerts = db.relationship("PriceAlert",  backref="user", lazy=True)
 
 
 class Wallet(db.Model):
@@ -84,3 +85,26 @@ class Watchlist(db.Model):
     user_id    = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     symbol     = db.Column(db.String(20), nullable=False)
     added_at   = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class PriceAlert(db.Model):
+    """
+    Fiyat alarmı: bir hisse belirli fiyatın üstüne/altına indiğinde email gönder.
+    direction: 'above' | 'below'
+    status: 'active' | 'triggered' | 'cancelled'
+    """
+    __tablename__ = "price_alert"
+    __table_args__ = (
+        db.Index("ix_price_alert_user_id", "user_id"),
+        db.Index("ix_price_alert_active",  "status"),
+    )
+
+    id           = db.Column(db.Integer, primary_key=True)
+    user_id      = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    symbol       = db.Column(db.String(20),  nullable=False)
+    target_price = db.Column(db.Float,       nullable=False)
+    direction    = db.Column(db.String(10),  nullable=False)   # 'above' | 'below'
+    note         = db.Column(db.String(200), nullable=True)    # kullanıcı notu
+    status       = db.Column(db.String(20),  default="active") # 'active' | 'triggered' | 'cancelled'
+    created_at   = db.Column(db.DateTime,    default=datetime.utcnow)
+    triggered_at = db.Column(db.DateTime,    nullable=True)

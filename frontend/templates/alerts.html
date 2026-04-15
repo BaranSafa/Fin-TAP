@@ -1,0 +1,346 @@
+{% extends "base.html" %}
+{% block title %}Price Alerts — Fin-TAP{% endblock %}
+{% block header_title %}Price Alerts{% endblock %}
+{% block header_sub %}GET NOTIFIED WHEN A STOCK HITS YOUR TARGET{% endblock %}
+
+{% block content %}
+<style>
+    .alerts-grid {
+        display: grid;
+        grid-template-columns: 360px 1fr;
+        gap: 16px;
+        align-items: start;
+    }
+    @media (max-width: 900px) { .alerts-grid { grid-template-columns: 1fr; } }
+
+    .form-group { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+    .form-label { font-size: 0.72rem; font-weight: 700; color: var(--text2); letter-spacing: 0.3px; }
+
+    .dir-grid {
+        display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    }
+    .dir-opt {
+        display: flex; align-items: center; gap: 9px;
+        padding: 10px 12px;
+        background: var(--surface2); border: 1px solid var(--border);
+        border-radius: 7px; cursor: pointer; transition: all 0.15s;
+    }
+    .dir-opt:hover { border-color: var(--border2); }
+    .dir-opt.selected-above { border-color: var(--green); background: var(--green-dim); }
+    .dir-opt.selected-below { border-color: var(--red);   background: var(--red-dim);  }
+    .dir-opt input { accent-color: var(--accent); }
+    .dir-name { font-weight: 700; font-size: 0.83rem; }
+    .dir-meta { font-family: var(--mono); font-size: 0.6rem; color: var(--text2); margin-top: 1px; }
+
+    .btn-create {
+        width: 100%; background: var(--accent); color: #000;
+        border: none; border-radius: 8px; padding: 12px;
+        font-family: var(--sans); font-weight: 800; font-size: 0.9rem;
+        cursor: pointer; transition: all 0.2s; letter-spacing: 0.5px; margin-top: 4px;
+    }
+    .btn-create:hover:not(:disabled) { background: #fff; transform: translateY(-1px); }
+    .btn-create:disabled { opacity: 0.5; cursor: default; }
+
+    /* ── Alerts table ── */
+    .alert-row {
+        display: grid;
+        grid-template-columns: 70px 1fr 110px 90px 100px 80px 36px;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.82rem;
+        transition: background 0.15s;
+    }
+    .alert-row:last-child { border-bottom: none; }
+    .alert-row:hover { background: rgba(255,255,255,0.02); }
+    .alert-head {
+        display: grid;
+        grid-template-columns: 70px 1fr 110px 90px 100px 80px 36px;
+        gap: 8px;
+        padding: 8px 16px;
+        border-bottom: 1px solid var(--border);
+        font-family: var(--mono); font-size: 0.58rem;
+        color: var(--text3); letter-spacing: 0.5px;
+    }
+
+    .sym-badge {
+        font-family: var(--mono); font-weight: 700; font-size: 0.75rem;
+        padding: 2px 8px; border-radius: 4px;
+        background: var(--accent-dim); color: var(--accent);
+        border: 1px solid rgba(0,212,255,0.2); display: inline-block;
+    }
+
+    .dir-badge {
+        font-family: var(--mono); font-weight: 700; font-size: 0.6rem;
+        padding: 2px 8px; border-radius: 4px; display: inline-block;
+        letter-spacing: 0.5px;
+    }
+    .dir-above { background: var(--green-dim); color: var(--green); border: 1px solid rgba(0,230,118,0.2); }
+    .dir-below { background: var(--red-dim);   color: var(--red);   border: 1px solid rgba(255,69,96,0.2);  }
+
+    .status-badge {
+        font-family: var(--mono); font-weight: 700; font-size: 0.58rem;
+        padding: 2px 8px; border-radius: 4px; display: inline-block;
+        letter-spacing: 0.5px;
+    }
+    .st-active    { background: rgba(0,212,255,0.08); color: var(--accent); border: 1px solid rgba(0,212,255,0.2); }
+    .st-triggered { background: rgba(0,230,118,0.08); color: var(--green);  border: 1px solid rgba(0,230,118,0.2); }
+    .st-cancelled { background: var(--surface2);      color: var(--text3);  border: 1px solid var(--border); }
+
+    .btn-del {
+        background: transparent; border: 1px solid var(--border);
+        color: var(--text3); border-radius: 5px; width: 28px; height: 28px;
+        cursor: pointer; font-size: 0.75rem; transition: all 0.15s;
+        display: flex; align-items: center; justify-content: center;
+    }
+    .btn-del:hover { border-color: var(--red); color: var(--red); background: var(--red-dim); }
+
+    .empty-alerts {
+        padding: 48px 20px; text-align: center;
+        color: var(--text3); font-family: var(--mono); font-size: 0.72rem;
+    }
+    .empty-alerts .ei { font-size: 2rem; margin-bottom: 10px; opacity: 0.3; }
+
+    .error-box {
+        background: rgba(255,69,96,0.08); border: 1px solid rgba(255,69,96,0.25);
+        border-radius: 7px; padding: 10px 14px; font-size: 0.8rem;
+        color: #ff8fa3; display: none; margin-bottom: 12px;
+    }
+    .success-box {
+        background: rgba(0,230,118,0.08); border: 1px solid rgba(0,230,118,0.25);
+        border-radius: 7px; padding: 10px 14px; font-size: 0.8rem;
+        color: var(--green); display: none; margin-bottom: 12px;
+    }
+
+    .info-box {
+        background: var(--surface2); border: 1px solid var(--border);
+        border-radius: 8px; padding: 14px 16px;
+        font-size: 0.78rem; color: var(--text2); line-height: 1.6;
+    }
+    .info-box .ib-title {
+        font-family: var(--mono); font-size: 0.6rem; color: var(--text3);
+        letter-spacing: 2px; margin-bottom: 8px;
+    }
+</style>
+
+<div class="fade-up">
+    <div class="alerts-grid">
+
+        <!-- ── LEFT: Create Alert ── -->
+        <div style="display:flex; flex-direction:column; gap:14px;">
+            <div class="card card-pad">
+                <div class="sec-label">// NEW PRICE ALERT</div>
+
+                <div class="error-box"   id="alert-error"></div>
+                <div class="success-box" id="alert-success"></div>
+
+                <div class="form-group">
+                    <label class="form-label">Ticker Symbol</label>
+                    <select id="al-ticker" class="form-select">
+                        <optgroup label="── STOCKS ──">
+                        {% for t in trained_stocks %}{% if '-USD' not in t %}
+                        <option value="{{ t }}">{{ t }}</option>
+                        {% endif %}{% endfor %}
+                        </optgroup>
+                        <optgroup label="── CRYPTO ──">
+                        {% for t in trained_stocks %}{% if '-USD' in t %}
+                        <option value="{{ t }}">{{ t }}</option>
+                        {% endif %}{% endfor %}
+                        </optgroup>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Target Price (USD)</label>
+                    <input id="al-price" class="form-input" type="number"
+                           min="0.01" step="0.01" placeholder="e.g. 200.00">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Alert Direction</label>
+                    <div class="dir-grid">
+                        <label class="dir-opt selected-above" id="opt-above"
+                               onclick="selectDir(this,'above')">
+                            <input type="radio" name="direction" value="above" checked hidden>
+                            <div>
+                                <div class="dir-name" style="color:var(--green)">▲ Above</div>
+                                <div class="dir-meta">price rises to target</div>
+                            </div>
+                        </label>
+                        <label class="dir-opt" id="opt-below"
+                               onclick="selectDir(this,'below')">
+                            <input type="radio" name="direction" value="below" hidden>
+                            <div>
+                                <div class="dir-name" style="color:var(--red)">▼ Below</div>
+                                <div class="dir-meta">price drops to target</div>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Note (optional)</label>
+                    <input id="al-note" class="form-input" type="text"
+                           maxlength="200" placeholder="e.g. Support level breakout">
+                </div>
+
+                <button class="btn-create" id="create-btn" onclick="createAlert()">
+                    + SET ALERT
+                </button>
+            </div>
+
+            <div class="info-box">
+                <div class="ib-title">// HOW IT WORKS</div>
+                <p>Alerts are checked every 15 minutes via scheduled jobs.</p>
+                <ul style="margin-top:8px; padding-left:18px; display:flex; flex-direction:column; gap:5px;">
+                    <li>Set a <strong>target price</strong> and direction</li>
+                    <li>When triggered, you receive an <strong>email notification</strong></li>
+                    <li>Each alert fires <strong>once</strong> then becomes inactive</li>
+                    <li>Max <strong>20 active alerts</strong> per account</li>
+                </ul>
+                <p style="margin-top:10px; font-family:var(--mono); font-size:0.65rem; color:var(--text3);">
+                    Requires MAIL_SERVER to be configured on the server.
+                </p>
+            </div>
+        </div>
+
+        <!-- ── RIGHT: Alerts List ── -->
+        <div class="card" style="overflow:hidden;">
+            <div style="padding:14px 16px; border-bottom:1px solid var(--border);
+                        display:flex; align-items:center; justify-content:space-between;">
+                <div class="sec-label" style="margin-bottom:0;">// YOUR ALERTS</div>
+                <div style="font-family:var(--mono); font-size:0.65rem; color:var(--text3);"
+                     id="alert-count">—</div>
+            </div>
+
+            <div id="alerts-list">
+                <div class="alert-head">
+                    <div>SYMBOL</div>
+                    <div>NOTE</div>
+                    <div>TARGET</div>
+                    <div>DIRECTION</div>
+                    <div>STATUS</div>
+                    <div>CREATED</div>
+                    <div></div>
+                </div>
+                <div id="alerts-body">
+                    <div class="empty-alerts">
+                        <div class="ei">🔔</div>
+                        <div>Loading alerts…</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let _selectedDir = 'above';
+const CSRF = () => document.cookie.split('; ').find(r => r.startsWith('csrf_token='))?.split('=')[1] || '';
+
+function selectDir(el, dir) {
+    _selectedDir = dir;
+    document.getElementById('opt-above').className = 'dir-opt' + (dir === 'above' ? ' selected-above' : '');
+    document.getElementById('opt-below').className = 'dir-opt' + (dir === 'below' ? ' selected-below' : '');
+    document.querySelector('input[name="direction"][value="above"]').checked = (dir === 'above');
+    document.querySelector('input[name="direction"][value="below"]').checked = (dir === 'below');
+}
+
+function showMsg(type, msg) {
+    const errEl = document.getElementById('alert-error');
+    const okEl  = document.getElementById('alert-success');
+    errEl.style.display = 'none';
+    okEl.style.display  = 'none';
+    if (type === 'error') { errEl.textContent = '⚠ ' + msg; errEl.style.display = 'block'; }
+    else { okEl.textContent = '✓ ' + msg; okEl.style.display = 'block'; setTimeout(() => okEl.style.display = 'none', 3000); }
+}
+
+async function createAlert() {
+    const ticker = document.getElementById('al-ticker').value;
+    const price  = parseFloat(document.getElementById('al-price').value);
+    const note   = document.getElementById('al-note').value.trim();
+
+    if (isNaN(price) || price <= 0) { showMsg('error', 'Please enter a valid target price.'); return; }
+
+    const btn = document.getElementById('create-btn');
+    btn.disabled = true; btn.textContent = 'Creating…';
+
+    try {
+        const r = await fetch('/api/alerts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF() },
+            body: JSON.stringify({ symbol: ticker, target_price: price, direction: _selectedDir, note }),
+        });
+        const d = await r.json();
+        if (!r.ok || d.error) { showMsg('error', d.error || 'Failed to create alert.'); return; }
+        showMsg('ok', `Alert set: ${ticker} ${_selectedDir} $${price.toFixed(2)}`);
+        document.getElementById('al-price').value = '';
+        document.getElementById('al-note').value  = '';
+        loadAlerts();
+    } catch(e) {
+        showMsg('error', 'Network error. Please try again.');
+    } finally {
+        btn.disabled = false; btn.textContent = '+ SET ALERT';
+    }
+}
+
+async function deleteAlert(id) {
+    if (!confirm('Delete this alert?')) return;
+    try {
+        await fetch(`/api/alerts/${id}`, {
+            method: 'DELETE',
+            headers: { 'X-CSRFToken': CSRF() },
+        });
+        loadAlerts();
+    } catch(e) {}
+}
+
+async function loadAlerts() {
+    try {
+        const r = await fetch('/api/alerts');
+        const alerts = await r.json();
+
+        const body = document.getElementById('alerts-body');
+        const countEl = document.getElementById('alert-count');
+
+        const active = alerts.filter(a => a.status === 'active').length;
+        countEl.textContent = `${active} active · ${alerts.length} total`;
+
+        if (!alerts.length) {
+            body.innerHTML = '<div class="empty-alerts"><div class="ei">🔔</div><div>No alerts yet. Set your first alert →</div></div>';
+            return;
+        }
+
+        body.innerHTML = alerts.map(a => {
+            const dirClass = a.direction === 'above' ? 'dir-above' : 'dir-below';
+            const dirText  = a.direction === 'above' ? '▲ ABOVE' : '▼ BELOW';
+            const stClass  = a.status === 'active' ? 'st-active' : a.status === 'triggered' ? 'st-triggered' : 'st-cancelled';
+            const stText   = a.status.toUpperCase();
+            const trig     = a.triggered_at ? `<span style="font-family:var(--mono);font-size:0.65rem;color:var(--green);">✓ ${a.triggered_at}</span>` : '';
+            const del      = a.status === 'active'
+                ? `<button class="btn-del" onclick="deleteAlert(${a.id})" title="Delete">✕</button>`
+                : `<div style="width:28px;"></div>`;
+            return `<div class="alert-row">
+                <div><span class="sym-badge">${a.symbol}</span></div>
+                <div style="color:var(--text2);font-size:0.78rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${a.note}">${a.note || '—'}</div>
+                <div style="font-family:var(--mono);font-weight:700;">$${Number(a.target_price).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+                <div><span class="dir-badge ${dirClass}">${dirText}</span></div>
+                <div><span class="status-badge ${stClass}">${stText}</span>${trig}</div>
+                <div style="font-family:var(--mono);font-size:0.65rem;color:var(--text3);">${a.created_at.substring(0,10)}</div>
+                <div>${del}</div>
+            </div>`;
+        }).join('');
+
+    } catch(e) {
+        document.getElementById('alerts-body').innerHTML =
+            '<div class="empty-alerts"><div>Failed to load alerts.</div></div>';
+    }
+}
+
+// On page load
+loadAlerts();
+</script>
+{% endblock %}
