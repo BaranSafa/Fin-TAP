@@ -82,6 +82,19 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
+    /* Timeframe buttons */
+    .tf-btn {
+        background: var(--surface2); border: 1px solid var(--border);
+        color: var(--text2); border-radius: 6px; padding: 7px 0;
+        font-family: var(--mono); font-size: 0.72rem; font-weight: 700;
+        cursor: pointer; transition: all 0.15s; letter-spacing: 1px;
+    }
+    .tf-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .tf-btn.tf-active {
+        background: var(--accent-dim); border-color: var(--accent);
+        color: var(--accent);
+    }
+
     /* Sentiment widget */
     .sent-score-bar {
         height: 6px; background: var(--surface3); border-radius: 3px;
@@ -201,6 +214,20 @@
             </label>
         </div>
 
+        <!-- Timeframe selector -->
+        <div class="card card-pad">
+            <div class="sec-label">// FORECAST HORIZON</div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px;">
+                <button class="tf-btn" data-days="7"  onclick="setHorizon(this)">7D</button>
+                <button class="tf-btn tf-active" data-days="14" onclick="setHorizon(this)">14D</button>
+                <button class="tf-btn" data-days="30" onclick="setHorizon(this)">30D</button>
+                <button class="tf-btn" data-days="90" onclick="setHorizon(this)">90D</button>
+            </div>
+            <div id="horizon-note" style="margin-top:8px;font-family:var(--mono);font-size:0.6rem;color:var(--text3);line-height:1.5;">
+                14-day forecast — balanced accuracy vs horizon.
+            </div>
+        </div>
+
         <!-- Run button -->
         <button id="run-btn" class="btn-run" onclick="runPrediction()">
             ▶ RUN ANALYSIS (1 TOKEN)
@@ -254,7 +281,7 @@
             <!-- Stats row -->
             <div style="display:grid; grid-template-columns:repeat(4,1fr); border-bottom:1px solid var(--border);">
                 <div class="result-stat">
-                    <span class="rs-label">14-DAY TARGET</span>
+                    <span class="rs-label" id="horizon-label">14-DAY TARGET</span>
                     <span class="rs-value c-accent" id="res-price">—</span>
                 </div>
                 <div class="result-stat">
@@ -273,7 +300,7 @@
 
             <!-- Chart -->
             <div style="padding:20px;">
-                <div class="sec-label">// BACKTEST VALIDATION + 14-DAY FORECAST</div>
+                <div class="sec-label" id="chart-label">// BACKTEST VALIDATION + 14-DAY FORECAST</div>
                 <div style="position:relative; height:280px;">
                     <canvas id="predChart"></canvas>
                 </div>
@@ -317,6 +344,24 @@
 {% block scripts %}
 <script>
 let predChart = null;
+let selectedHorizon = 14;
+
+const horizonNotes = {
+    7:  '7-day forecast — highest accuracy, short-term signal.',
+    14: '14-day forecast — balanced accuracy vs horizon.',
+    30: '30-day forecast — medium-term trend, lower precision.',
+    90: '90-day forecast — long-term direction, use with caution.',
+};
+
+function setHorizon(btn) {
+    document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('tf-active'));
+    btn.classList.add('tf-active');
+    selectedHorizon = parseInt(btn.dataset.days);
+    document.getElementById('horizon-note').textContent = horizonNotes[selectedHorizon];
+    // Update result label if panel is already showing
+    const lbl = document.getElementById('horizon-label');
+    if (lbl) lbl.textContent = `${selectedHorizon}-DAY TARGET`;
+}
 
 function selectModel(el, val) {
     document.querySelectorAll('.model-opt').forEach(m => m.classList.remove('selected'));
@@ -358,7 +403,7 @@ async function runPrediction() {
         const res  = await fetch('/api/predict_run', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ticker, model, features })
+            body: JSON.stringify({ ticker, model, features, horizon: selectedHorizon })
         });
 
         if (!res.ok || res.headers.get('content-type')?.includes('text/html')) {
@@ -377,10 +422,13 @@ async function runPrediction() {
         // Fill stats
         document.getElementById('res-price').textContent   = `$${data.prediction}`;
         document.getElementById('res-model').textContent   = model;
+        document.getElementById('horizon-label').textContent = `${selectedHorizon}-DAY TARGET`;
 
         // Hide empty state, show result
         document.getElementById('empty-state').style.display = 'none';
         document.getElementById('result-panel').style.display = 'block';
+        document.getElementById('chart-label').textContent =
+            `// BACKTEST VALIDATION + ${selectedHorizon}-DAY FORECAST`;
 
         // Draw chart
         drawChart(data.chart_data, ticker);

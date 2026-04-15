@@ -234,14 +234,21 @@ def _compute_row(
 # ──────────────────────────────────────────────────────────────
 #  ANA FONKSİYON
 # ──────────────────────────────────────────────────────────────
+VALID_HORIZONS = {7, 14, 30, 90}
+
+
 def train_and_predict_dynamic(
     ticker: str,
     model_type: str,
     selected_feature_groups: list,
+    horizon: int = 14,
 ) -> tuple:
     """
     Returns: (future_prices: list, chart_data: dict) | (None, None)
+    horizon: kaç günlük tahmin — 7 | 14 | 30 | 90
     """
+    if horizon not in VALID_HORIZONS:
+        horizon = 14
     # 1. Veri
     df = get_processed_data(ticker)
     if df is None or df.empty:
@@ -447,7 +454,7 @@ def train_and_predict_dynamic(
             seq_rows.append(sc.transform(rdf.values)[0])
         seq_arr = np.array(seq_rows)
 
-        for _ in range(14):
+        for _ in range(horizon):
             inp   = seq_arr[-seq_len:][np.newaxis]
             lr_p  = float(np.clip(model.predict(inp, verbose=0).flatten()[0], -0.15, 0.15))
             nxt   = last * np.exp(lr_p)
@@ -458,7 +465,7 @@ def train_and_predict_dynamic(
             rdf = pd.DataFrame([row])[feat_set]
             seq_arr = np.vstack([seq_arr, sc.transform(rdf.values)[0]])
     else:
-        for step in range(14):
+        for step in range(horizon):
             try:
                 row  = _compute_row(ph, hh, lh, vh, feat_set)
                 rdf  = pd.DataFrame([row])[feat_set]
@@ -466,7 +473,6 @@ def train_and_predict_dynamic(
                 nxt  = last * np.exp(lr_p)
             except Exception as e:
                 print(f"[trainer] gelecek adım {step}: {e}")
-                # Düzeltildi: rastgele gürültü yerine son fiyatı kullan
                 nxt = last
             future.append(nxt)
             ph.append(nxt); hh.append(nxt*1.005); lh.append(nxt*0.995)
@@ -480,11 +486,12 @@ def train_and_predict_dynamic(
     last_date    = df.index[-1]
     future_dates = [
         (last_date + timedelta(days=i)).strftime("%Y-%m-%d")
-        for i in range(1, 15)
+        for i in range(1, horizon + 1)
     ]
     chart = {
         "dates":            bt_dates + future_dates,
-        "actual_prices":    bt_actual + [None]*14,
+        "actual_prices":    bt_actual + [None] * horizon,
         "predicted_prices": bt_pred   + future,
+        "horizon":          horizon,
     }
     return future, chart

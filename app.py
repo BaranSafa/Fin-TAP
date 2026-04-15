@@ -671,6 +671,7 @@ def api_predict_run():
     ticker   = str(payload.get("ticker", "AAPL")).upper().strip()
     model    = str(payload.get("model",  "LINEAR")).upper().strip()
     features = payload.get("features", [])
+    horizon  = int(payload.get("horizon", 14))
 
     # Input validation
     if ticker not in VALID_TICKERS:
@@ -682,15 +683,17 @@ def api_predict_run():
     invalid_feats = [f for f in features if f not in VALID_FEATURE_GROUPS]
     if invalid_feats:
         return jsonify({"error": f"Geçersiz feature group(lar): {invalid_feats}"}), 400
+    if horizon not in {7, 14, 30, 90}:
+        return jsonify({"error": "Geçersiz horizon. 7, 14, 30 veya 90 olmalı."}), 400
 
     w = get_wallet()
     if w.balance <= 0:
         return jsonify({"error": "Yetersiz bakiye"}), 402
 
-    print(f"[predict_run] {ticker} | {model} | {len(features)} feature")
+    print(f"[predict_run] {ticker} | {model} | {len(features)} feature | {horizon}d")
 
     try:
-        preds, chart_data = train_and_predict_dynamic(ticker, model, features)
+        preds, chart_data = train_and_predict_dynamic(ticker, model, features, horizon)
     except Exception as e:
         print(f"[predict_run] EXCEPTION: {e}"); traceback.print_exc()
         return jsonify({"error": f"Model istisnası: {str(e)[:300]}"}), 500
