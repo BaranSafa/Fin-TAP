@@ -42,7 +42,9 @@ BACKEND_DIR = os.path.join(BASE_DIR, "backend")
 sys.path.insert(0, BACKEND_DIR)
 sys.path.insert(0, BASE_DIR)
 
-from models import db, User, Wallet, Transaction, Prediction, Watchlist, PriceAlert
+from models import (db, User, Wallet, Transaction, Prediction, Watchlist,
+                    PriceAlert, PaperPortfolio, PaperPosition, PaperTrade,
+                    PAPER_STARTING_CASH)
 
 # ── Backend ────────────────────────────────────────────────────────────────
 try:
@@ -1154,6 +1156,209 @@ def api_alerts_check():
     db.session.commit()
     print(f"[alerts] Check tamamlandı: {len(active_alerts)} kontrol, {triggered_count} tetiklendi")
     return jsonify({"checked": len(active_alerts), "triggered": triggered_count})
+
+
+# ── Paper Trading API ──────────────────────────────────────────────────────
+
+def _get_or_create_paper(user_id: int) -> PaperPortfolio:
+    """Kullanıcının sanal portföyünü getir; yoksa oluştur."""
+    p = PaperPortfolio.query.filter_by(user_id=user_id).first()
+    if not p:
+        p = PaperPortfolio(user_id=user_id, cash=PAPER_STARTING_CASH)
+        db.session.add(p)
+        db.session.commit()
+    return p
+
+
+@app.route("/paper")
+@login_required
+def paper_page():
+    w = get_wallet()
+    return render_template("paper_trading.html",
+                           trained_stocks=TICKERS_TO_TRAIN,
+                           balance=w.balance,
+                           user=current_user)
+
+
+@app.route("/api/paper/portfolio")
+@login_required
+@limiter.limit("60 per minute")
+@csrf.exempt
+def api_paper_portfolio():
+    """Nakit + açık pozisyonlar + gerçek zamanlı P&L."""
+    port = _get_or_create_paper(current_user.id)
+    positions = PaperPosition.query.filter_by(user_id=current_user.id).all()
+
+    pos_data = []
+    total_market_value = 0.0
+
+    for pos in positions:
+        if pos.quantity <= 0:
+            continue
+        try:
+            df = get_processed_data(pos.symbol)
+            cur_price = float(df["Close"].iloc[-1]) if df is not None and not df.empty else None
+        except Exception:
+            cur_price = None
+
+        market_val = round(pos.quantity * cur_price, 2) if cur_price else None
+        cost_basis = round(pos.quantity * pos.avg_cost, 2)
+        pnl        = round(market_val - cost_basis, 2) if market_val is not None else None
+        pnl_pct    = round((pnl / cost_basis) * 100, 2) if (pnl is not None and cost_basis) else None
+
+        if market_val:
+            total_market_value += market_val
+
+        pos_data.append({
+            "symbol":       pos.symbol,
+            "quantity":     round(pos.quantity, 6),
+            "avg_cost":     round(pos.avg_cost, 4),
+            "cur_price":    round(cur_price, 4) if cur_price else None,
+            "market_value": market_val,
+            "cost_basis":   cost_basis,
+            "pnl":          pnl,
+            "pnl_pct":      pnl_pct,
+        })
+
+    total_equity = round(port.cash + total_market_value, 2)
+    total_return = round(total_equity - PAPER_STARTING_CASH, 2)
+    total_return_pct = round((total_return / PAPER_STARTING_CASH) * 100, 2)
+
+    return jsonify({
+        "cash":             round(port.cash, 2),
+        "market_value":     round(total_market_value, 2),
+        "total_equity":     total_equity,
+        "total_return":     total_return,
+        "total_return_pct": total_return_pct,
+        "starting_cash":    PAPER_STARTING_CASH,
+        "positions":        sorted(pos_data, key=lambda x: -(x["market_value"] or 0)),
+    })
+
+
+@app.route("/api/paper/trade", methods=["POST"])
+@login_required
+@limiter.limit("30 per minute")
+@csrf.exempt
+def api_paper_trade():
+    """Sanal alım/satım işlemi."""
+    payload  = request.get_json(silent=True) or {}
+    symbol   = str(payload.get("symbol", "")).upper().strip()
+    action   = str(payload.get("action", "")).lower().strip()
+    quantity = payload.get("quantity")
+
+    if symbol not in VALID_TICKERS:
+        return jsonify({"error": "Geçersiz ticker."}), 400
+    if action not in ("buy", "sell"):
+        return jsonify({"error": "action 'buy' veya 'sell' olmalı."}), 400
+    try:
+        quantity = float(quantity)
+        if quantity <= 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return jsonify({"error": "Geçersiz miktar."}), 400
+
+    # Güncel fiyatı çek
+    try:
+        df = get_processed_data(symbol)
+        if df is None or df.empty:
+            return jsonify({"error": "Fiyat verisi alınamadı."}), 422
+        cur_price = float(df["Close"].iloc[-1])
+    except Exception:
+        return jsonify({"error": "Fiyat verisi alınamadı."}), 422
+
+    total_cost = round(quantity * cur_price, 6)
+    port = _get_or_create_paper(current_user.id)
+
+    if action == "buy":
+        if port.cash < total_cost:
+            return jsonify({"error": f"Yetersiz bakiye. Mevcut: ${port.cash:,.2f}, Gerekli: ${total_cost:,.2f}"}), 400
+
+        port.cash = round(port.cash - total_cost, 6)
+
+        pos = PaperPosition.query.filter_by(
+            user_id=current_user.id, symbol=symbol
+        ).first()
+        if pos:
+            # Ortalama maliyet güncelle
+            new_qty  = pos.quantity + quantity
+            pos.avg_cost = round((pos.avg_cost * pos.quantity + cur_price * quantity) / new_qty, 6)
+            pos.quantity = round(new_qty, 6)
+        else:
+            pos = PaperPosition(
+                user_id=current_user.id, symbol=symbol,
+                quantity=round(quantity, 6), avg_cost=round(cur_price, 6),
+            )
+            db.session.add(pos)
+
+    else:  # sell
+        pos = PaperPosition.query.filter_by(
+            user_id=current_user.id, symbol=symbol
+        ).first()
+        if not pos or pos.quantity < quantity:
+            held = round(pos.quantity, 4) if pos else 0
+            return jsonify({"error": f"Yetersiz pozisyon. Elinizde: {held} {symbol}"}), 400
+
+        port.cash    = round(port.cash + total_cost, 6)
+        pos.quantity = round(pos.quantity - quantity, 6)
+        if pos.quantity < 1e-6:
+            db.session.delete(pos)
+
+    trade = PaperTrade(
+        user_id=current_user.id, symbol=symbol, action=action,
+        quantity=round(quantity, 6), price=round(cur_price, 4),
+        total=round(total_cost, 2),
+    )
+    db.session.add(trade)
+    db.session.commit()
+
+    return jsonify({
+        "status":    "executed",
+        "action":    action,
+        "symbol":    symbol,
+        "quantity":  round(quantity, 6),
+        "price":     round(cur_price, 4),
+        "total":     round(total_cost, 2),
+        "new_cash":  round(port.cash, 2),
+    })
+
+
+@app.route("/api/paper/history")
+@login_required
+@limiter.limit("30 per minute")
+@csrf.exempt
+def api_paper_history():
+    """Son 50 işlem geçmişi."""
+    trades = (PaperTrade.query
+              .filter_by(user_id=current_user.id)
+              .order_by(PaperTrade.executed_at.desc())
+              .limit(50).all())
+    return jsonify([{
+        "id":          t.id,
+        "symbol":      t.symbol,
+        "action":      t.action,
+        "quantity":    round(t.quantity, 6),
+        "price":       round(t.price, 4),
+        "total":       round(t.total, 2),
+        "executed_at": t.executed_at.strftime("%Y-%m-%d %H:%M"),
+    } for t in trades])
+
+
+@app.route("/api/paper/reset", methods=["POST"])
+@login_required
+@limiter.limit("3 per hour")
+@csrf.exempt
+def api_paper_reset():
+    """Sanal portföyü sıfırla — tüm pozisyonları ve geçmişi temizle."""
+    port = _get_or_create_paper(current_user.id)
+
+    PaperPosition.query.filter_by(user_id=current_user.id).delete()
+    PaperTrade.query.filter_by(user_id=current_user.id).delete()
+
+    port.cash     = PAPER_STARTING_CASH
+    port.reset_at = _dt.utcnow()
+    db.session.commit()
+
+    return jsonify({"status": "reset", "cash": PAPER_STARTING_CASH})
 
 
 # ── Prediction Accuracy API ────────────────────────────────────────────────

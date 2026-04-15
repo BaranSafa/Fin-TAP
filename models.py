@@ -108,3 +108,53 @@ class PriceAlert(db.Model):
     status       = db.Column(db.String(20),  default="active") # 'active' | 'triggered' | 'cancelled'
     created_at   = db.Column(db.DateTime,    default=datetime.utcnow)
     triggered_at = db.Column(db.DateTime,    nullable=True)
+
+
+PAPER_STARTING_CASH = 10_000.0
+
+
+class PaperPortfolio(db.Model):
+    """
+    Her kullanıcı için sanal trading hesabı.
+    cash: mevcut nakit bakiyesi (başlangıç: 10.000 USD)
+    """
+    __tablename__ = "paper_portfolio"
+
+    id         = db.Column(db.Integer, primary_key=True)
+    user_id    = db.Column(db.Integer, db.ForeignKey("user.id"), unique=True, nullable=False, index=True)
+    cash       = db.Column(db.Float,   default=PAPER_STARTING_CASH, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    reset_at   = db.Column(db.DateTime, nullable=True)
+
+
+class PaperPosition(db.Model):
+    """Açık sanal pozisyon — bir kullanıcının elinde tuttuğu hisse."""
+    __tablename__ = "paper_position"
+    __table_args__ = (
+        db.Index("ix_paper_position_user_id", "user_id"),
+        db.UniqueConstraint("user_id", "symbol", name="uq_paper_pos_user_sym"),
+    )
+
+    id         = db.Column(db.Integer, primary_key=True)
+    user_id    = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    symbol     = db.Column(db.String(20), nullable=False)
+    quantity   = db.Column(db.Float,  nullable=False, default=0.0)   # fractional shares
+    avg_cost   = db.Column(db.Float,  nullable=False, default=0.0)   # ortalama alış fiyatı
+    opened_at  = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class PaperTrade(db.Model):
+    """Gerçekleşmiş sanal işlem kaydı."""
+    __tablename__ = "paper_trade"
+    __table_args__ = (
+        db.Index("ix_paper_trade_user_id", "user_id"),
+    )
+
+    id         = db.Column(db.Integer, primary_key=True)
+    user_id    = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    symbol     = db.Column(db.String(20), nullable=False)
+    action     = db.Column(db.String(10), nullable=False)   # 'buy' | 'sell'
+    quantity   = db.Column(db.Float,  nullable=False)
+    price      = db.Column(db.Float,  nullable=False)       # işlem fiyatı
+    total      = db.Column(db.Float,  nullable=False)       # qty * price
+    executed_at = db.Column(db.DateTime, default=datetime.utcnow)

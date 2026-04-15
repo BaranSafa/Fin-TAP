@@ -1,0 +1,495 @@
+{% extends "base.html" %}
+{% block title %}Paper Trading — Fin-TAP{% endblock %}
+{% block header_title %}Paper Trading{% endblock %}
+{% block header_sub %}PRACTICE WITH $10,000 VIRTUAL CASH — NO RISK{% endblock %}
+
+{% block content %}
+<style>
+    .pt-grid {
+        display: grid;
+        grid-template-columns: 340px 1fr;
+        gap: 16px;
+        align-items: start;
+    }
+    @media (max-width: 960px) { .pt-grid { grid-template-columns: 1fr; } }
+
+    /* ── Stats band ── */
+    .stats-band {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 10px;
+        margin-bottom: 16px;
+    }
+    @media (max-width: 960px) { .stats-band { grid-template-columns: repeat(3,1fr); } }
+
+    .stat-pill {
+        background: var(--surface); border: 1px solid var(--border);
+        border-radius: 10px; padding: 14px 12px; text-align: center;
+    }
+    .stat-val { font-family: var(--mono); font-size: 1.1rem; font-weight: 700; margin-bottom: 4px; }
+    .stat-lbl { font-size: 0.62rem; color: var(--text3); letter-spacing: 0.5px; }
+
+    /* ── Trade form ── */
+    .form-group { margin-bottom: 14px; }
+    .form-label { display:block; font-size:0.72rem; font-weight:700; color:var(--text2); margin-bottom:6px; letter-spacing:0.3px; }
+
+    .action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .action-opt {
+        display: flex; align-items: center; gap: 8px;
+        padding: 10px 12px; background: var(--surface2);
+        border: 1px solid var(--border); border-radius: 7px;
+        cursor: pointer; transition: all 0.15s;
+    }
+    .action-opt:hover { border-color: var(--border2); }
+    .action-opt.sel-buy  { border-color: var(--green); background: var(--green-dim); }
+    .action-opt.sel-sell { border-color: var(--red);   background: var(--red-dim);   }
+    .action-name { font-weight: 700; font-size: 0.85rem; }
+    .action-meta { font-family: var(--mono); font-size: 0.6rem; color: var(--text2); margin-top: 1px; }
+
+    .qty-presets { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+    .qty-btn {
+        padding: 3px 9px; border-radius: 5px;
+        border: 1px solid var(--border); background: var(--surface2);
+        font-family: var(--mono); font-size: 0.62rem; color: var(--text3);
+        cursor: pointer; transition: all 0.15s;
+    }
+    .qty-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    .order-preview {
+        background: var(--surface2); border: 1px solid var(--border);
+        border-radius: 7px; padding: 10px 14px;
+        font-family: var(--mono); font-size: 0.72rem; color: var(--text2);
+        margin-bottom: 14px; display: none;
+    }
+    .order-preview .op-row { display: flex; justify-content: space-between; margin-bottom: 4px; }
+    .order-preview .op-row:last-child { margin-bottom: 0; border-top: 1px solid var(--border); padding-top: 6px; }
+    .op-key { color: var(--text3); }
+    .op-val { color: var(--text); font-weight: 700; }
+
+    .btn-exec {
+        width: 100%; background: var(--accent); color: #000;
+        border: none; border-radius: 8px; padding: 12px;
+        font-family: var(--sans); font-weight: 800; font-size: 0.9rem;
+        cursor: pointer; transition: all 0.2s; letter-spacing: 0.5px;
+    }
+    .btn-exec:hover:not(:disabled) { background: #fff; transform: translateY(-1px); }
+    .btn-exec:disabled { opacity: 0.5; cursor: default; }
+    .btn-exec.sell-mode { background: var(--red); color: #fff; }
+    .btn-exec.sell-mode:hover:not(:disabled) { background: #ff7a8a; }
+
+    .btn-reset {
+        width: 100%; background: transparent; color: var(--text3);
+        border: 1px solid var(--border); border-radius: 7px; padding: 9px;
+        font-family: var(--mono); font-size: 0.65rem; cursor: pointer;
+        transition: all 0.2s; letter-spacing: 1px; margin-top: 8px;
+    }
+    .btn-reset:hover { border-color: var(--red); color: var(--red); }
+
+    /* ── Positions table ── */
+    .pos-head, .pos-row {
+        display: grid;
+        grid-template-columns: 70px 60px 90px 90px 90px 80px 80px;
+        gap: 6px; padding: 9px 16px;
+        font-size: 0.8rem; align-items: center;
+    }
+    .pos-head {
+        font-family: var(--mono); font-size: 0.58rem;
+        color: var(--text3); letter-spacing: 0.5px;
+        border-bottom: 1px solid var(--border);
+    }
+    .pos-row { border-bottom: 1px solid rgba(30,37,48,0.5); transition: background 0.15s; }
+    .pos-row:hover { background: rgba(255,255,255,0.02); }
+    .pos-row:last-child { border-bottom: none; }
+
+    /* ── Trades table ── */
+    .trade-head, .trade-row {
+        display: grid;
+        grid-template-columns: 70px 50px 70px 80px 80px 110px;
+        gap: 6px; padding: 8px 16px; font-size: 0.8rem; align-items: center;
+    }
+    .trade-head {
+        font-family: var(--mono); font-size: 0.58rem;
+        color: var(--text3); letter-spacing: 0.5px;
+        border-bottom: 1px solid var(--border);
+    }
+    .trade-row { border-bottom: 1px solid rgba(30,37,48,0.5); }
+    .trade-row:last-child { border-bottom: none; }
+
+    .sym-badge {
+        font-family: var(--mono); font-weight: 700; font-size: 0.72rem;
+        padding: 2px 7px; border-radius: 4px;
+        background: var(--accent-dim); color: var(--accent);
+        border: 1px solid rgba(0,212,255,0.2); display: inline-block;
+    }
+    .buy-badge  { background: var(--green-dim); color: var(--green); border: 1px solid rgba(0,230,118,0.2); font-family: var(--mono); font-size:0.62rem; font-weight:700; padding:2px 7px; border-radius:4px; display:inline-block; letter-spacing:0.5px; }
+    .sell-badge { background: var(--red-dim);   color: var(--red);   border: 1px solid rgba(255,69,96,0.2);  font-family: var(--mono); font-size:0.62rem; font-weight:700; padding:2px 7px; border-radius:4px; display:inline-block; letter-spacing:0.5px; }
+
+    .tab-bar { display: flex; gap: 4px; padding: 12px 16px 0; border-bottom: 1px solid var(--border); }
+    .tab-btn {
+        padding: 7px 16px; border-radius: 6px 6px 0 0;
+        border: 1px solid transparent; border-bottom: none;
+        font-family: var(--mono); font-size: 0.65rem; font-weight: 700;
+        color: var(--text3); background: transparent; cursor: pointer; letter-spacing: 0.5px;
+        transition: all 0.15s; margin-bottom: -1px;
+    }
+    .tab-btn.active { background: var(--surface2); border-color: var(--border); color: var(--accent); }
+
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    .error-box  { background: rgba(255,69,96,0.08); border: 1px solid rgba(255,69,96,0.25); border-radius:7px; padding:10px 14px; font-size:0.8rem; color:#ff8fa3; display:none; margin-bottom:12px; }
+    .success-box{ background: rgba(0,230,118,0.08); border: 1px solid rgba(0,230,118,0.25); border-radius:7px; padding:10px 14px; font-size:0.8rem; color:var(--green); display:none; margin-bottom:12px; }
+
+    .empty-state {
+        padding: 40px 20px; text-align: center;
+        color: var(--text3); font-family: var(--mono); font-size: 0.7rem;
+    }
+    .ei { font-size: 2rem; margin-bottom: 8px; opacity: 0.3; }
+</style>
+
+<div class="fade-up">
+
+    <!-- Stats band -->
+    <div class="stats-band">
+        <div class="stat-pill">
+            <div class="stat-val c-accent" id="s-equity">$—</div>
+            <div class="stat-lbl">TOTAL EQUITY</div>
+        </div>
+        <div class="stat-pill">
+            <div class="stat-val" id="s-cash" style="color:var(--text);">$—</div>
+            <div class="stat-lbl">CASH</div>
+        </div>
+        <div class="stat-pill">
+            <div class="stat-val" id="s-invested" style="color:var(--text);">$—</div>
+            <div class="stat-lbl">INVESTED</div>
+        </div>
+        <div class="stat-pill">
+            <div class="stat-val" id="s-pnl">$—</div>
+            <div class="stat-lbl">TOTAL P&amp;L</div>
+        </div>
+        <div class="stat-pill">
+            <div class="stat-val" id="s-pnlpct">—%</div>
+            <div class="stat-lbl">RETURN</div>
+        </div>
+    </div>
+
+    <div class="pt-grid">
+
+        <!-- ── LEFT: Order Form ── -->
+        <div style="display:flex; flex-direction:column; gap:14px;">
+            <div class="card card-pad">
+                <div class="sec-label">// PLACE ORDER</div>
+
+                <div class="error-box"    id="trade-error"></div>
+                <div class="success-box"  id="trade-success"></div>
+
+                <div class="form-group">
+                    <label class="form-label">Ticker</label>
+                    <select id="pt-ticker" class="form-select" onchange="updatePreview()">
+                        <optgroup label="── STOCKS ──">
+                        {% for t in trained_stocks %}{% if '-USD' not in t %}
+                        <option value="{{ t }}">{{ t }}</option>
+                        {% endif %}{% endfor %}
+                        </optgroup>
+                        <optgroup label="── CRYPTO ──">
+                        {% for t in trained_stocks %}{% if '-USD' in t %}
+                        <option value="{{ t }}">{{ t }}</option>
+                        {% endif %}{% endfor %}
+                        </optgroup>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Action</label>
+                    <div class="action-grid">
+                        <label class="action-opt sel-buy" id="opt-buy" onclick="selectAction(this,'buy')">
+                            <input type="radio" name="pt-action" value="buy" checked hidden>
+                            <div>
+                                <div class="action-name" style="color:var(--green)">▲ BUY</div>
+                                <div class="action-meta">go long</div>
+                            </div>
+                        </label>
+                        <label class="action-opt" id="opt-sell" onclick="selectAction(this,'sell')">
+                            <input type="radio" name="pt-action" value="sell" hidden>
+                            <div>
+                                <div class="action-name" style="color:var(--red)">▼ SELL</div>
+                                <div class="action-meta">close position</div>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Quantity (shares)</label>
+                    <input id="pt-qty" class="form-input" type="number"
+                           min="0.001" step="0.001" placeholder="e.g. 1.0"
+                           oninput="updatePreview()">
+                    <div class="qty-presets">
+                        <button class="qty-btn" onclick="setQty(1)">1</button>
+                        <button class="qty-btn" onclick="setQty(5)">5</button>
+                        <button class="qty-btn" onclick="setQty(10)">10</button>
+                        <button class="qty-btn" onclick="setQtyPct(0.25)">25%</button>
+                        <button class="qty-btn" onclick="setQtyPct(0.5)">50%</button>
+                        <button class="qty-btn" onclick="setQtyPct(1)">MAX</button>
+                    </div>
+                </div>
+
+                <div class="order-preview" id="order-preview">
+                    <div class="op-row"><span class="op-key">Market Price</span><span class="op-val" id="op-price">—</span></div>
+                    <div class="op-row"><span class="op-key">Quantity</span><span class="op-val" id="op-qty">—</span></div>
+                    <div class="op-row"><span class="op-key">Estimated Total</span><span class="op-val" id="op-total">—</span></div>
+                </div>
+
+                <button class="btn-exec" id="exec-btn" onclick="executeTrade()">
+                    ▲ BUY
+                </button>
+                <button class="btn-reset" onclick="resetPortfolio()">⟳ RESET PORTFOLIO</button>
+            </div>
+
+            <div class="card card-pad" style="font-size:0.78rem; color:var(--text2); line-height:1.6;">
+                <div class="sec-label">// ABOUT PAPER TRADING</div>
+                <p>Practice trading with <strong style="color:var(--accent);">$10,000</strong> virtual cash — no real money involved.</p>
+                <ul style="margin-top:8px; padding-left:18px; display:flex; flex-direction:column; gap:4px;">
+                    <li>Prices reflect latest available market data</li>
+                    <li>Fractional shares supported</li>
+                    <li>Reset anytime to start fresh</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- ── RIGHT: Tabs (Positions / History) ── -->
+        <div class="card" style="overflow:hidden;">
+            <div class="tab-bar">
+                <button class="tab-btn active" id="tab-pos-btn"  onclick="switchTab('positions')">Positions</button>
+                <button class="tab-btn"         id="tab-hist-btn" onclick="switchTab('history')">Trade History</button>
+            </div>
+
+            <!-- Positions tab -->
+            <div id="tab-positions" class="tab-panel active">
+                <div class="pos-head">
+                    <div>SYMBOL</div>
+                    <div>QTY</div>
+                    <div>AVG COST</div>
+                    <div>PRICE</div>
+                    <div>VALUE</div>
+                    <div>P&amp;L</div>
+                    <div>P&amp;L %</div>
+                </div>
+                <div id="positions-body">
+                    <div class="empty-state"><div class="ei">📂</div><div>Loading positions…</div></div>
+                </div>
+            </div>
+
+            <!-- History tab -->
+            <div id="tab-history" class="tab-panel">
+                <div class="trade-head">
+                    <div>SYMBOL</div>
+                    <div>ACTION</div>
+                    <div>QTY</div>
+                    <div>PRICE</div>
+                    <div>TOTAL</div>
+                    <div>TIME</div>
+                </div>
+                <div id="history-body">
+                    <div class="empty-state"><div class="ei">📜</div><div>Loading history…</div></div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const CSRF = () => document.cookie.split('; ').find(r => r.startsWith('csrf_token='))?.split('=')[1] || '';
+let _action = 'buy';
+let _portfolioData = null;
+let _priceCache = {};   // ticker → last known price
+
+function selectAction(el, action) {
+    _action = action;
+    document.getElementById('opt-buy').className  = 'action-opt' + (action === 'buy'  ? ' sel-buy'  : '');
+    document.getElementById('opt-sell').className = 'action-opt' + (action === 'sell' ? ' sel-sell' : '');
+    const btn = document.getElementById('exec-btn');
+    btn.className = 'btn-exec' + (action === 'sell' ? ' sell-mode' : '');
+    btn.textContent = action === 'buy' ? '▲ BUY' : '▼ SELL';
+    updatePreview();
+}
+
+function setQty(n) {
+    document.getElementById('pt-qty').value = n;
+    updatePreview();
+}
+
+function setQtyPct(pct) {
+    const ticker = document.getElementById('pt-ticker').value;
+    if (_action === 'buy') {
+        const price = _priceCache[ticker];
+        if (!price || !_portfolioData) return;
+        const qty = Math.floor((_portfolioData.cash * pct) / price * 1000) / 1000;
+        document.getElementById('pt-qty').value = Math.max(0.001, qty);
+    } else {
+        const pos = (_portfolioData?.positions || []).find(p => p.symbol === ticker);
+        if (!pos) return;
+        document.getElementById('pt-qty').value = Math.round(pos.quantity * pct * 1000) / 1000;
+    }
+    updatePreview();
+}
+
+function updatePreview() {
+    const ticker = document.getElementById('pt-ticker').value;
+    const qty    = parseFloat(document.getElementById('pt-qty').value);
+    const price  = _priceCache[ticker];
+
+    if (!price || isNaN(qty) || qty <= 0) {
+        document.getElementById('order-preview').style.display = 'none';
+        return;
+    }
+
+    const total = qty * price;
+    document.getElementById('op-price').textContent = '$' + price.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:4});
+    document.getElementById('op-qty').textContent   = qty.toLocaleString('en-US', {maximumFractionDigits:6});
+    document.getElementById('op-total').textContent = '$' + total.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+    document.getElementById('order-preview').style.display = 'block';
+}
+
+function showMsg(type, msg) {
+    const errEl = document.getElementById('trade-error');
+    const okEl  = document.getElementById('trade-success');
+    errEl.style.display = 'none';
+    okEl.style.display  = 'none';
+    if (type === 'error') { errEl.textContent = '⚠ ' + msg; errEl.style.display = 'block'; }
+    else { okEl.textContent = '✓ ' + msg; okEl.style.display = 'block'; setTimeout(() => okEl.style.display = 'none', 4000); }
+}
+
+async function executeTrade() {
+    const ticker = document.getElementById('pt-ticker').value;
+    const qty    = parseFloat(document.getElementById('pt-qty').value);
+
+    if (isNaN(qty) || qty <= 0) { showMsg('error', 'Please enter a valid quantity.'); return; }
+
+    const btn = document.getElementById('exec-btn');
+    btn.disabled = true;
+    btn.textContent = 'Executing…';
+
+    try {
+        const r = await fetch('/api/paper/trade', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF() },
+            body: JSON.stringify({ symbol: ticker, action: _action, quantity: qty }),
+        });
+        const d = await r.json();
+        if (!r.ok || d.error) { showMsg('error', d.error || 'Trade failed.'); return; }
+
+        showMsg('ok', `${_action.toUpperCase()} ${d.quantity} ${d.symbol} @ $${d.price.toFixed(2)} — Total: $${d.total.toFixed(2)}`);
+        document.getElementById('pt-qty').value = '';
+        document.getElementById('order-preview').style.display = 'none';
+        loadPortfolio();
+        loadHistory();
+    } catch(e) {
+        showMsg('error', 'Network error.');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = _action === 'buy' ? '▲ BUY' : '▼ SELL';
+    }
+}
+
+async function resetPortfolio() {
+    if (!confirm('Reset your paper portfolio? All positions and trade history will be cleared.')) return;
+    try {
+        await fetch('/api/paper/reset', {
+            method: 'POST', headers: { 'X-CSRFToken': CSRF() },
+        });
+        showMsg('ok', 'Portfolio reset to $10,000 cash.');
+        loadPortfolio();
+        loadHistory();
+    } catch(e) { showMsg('error', 'Reset failed.'); }
+}
+
+function switchTab(tab) {
+    ['positions','history'].forEach(t => {
+        document.getElementById(`tab-${t}`).classList.toggle('active', t === tab);
+        document.getElementById(`tab-${t}-btn`).classList.toggle('active', t === tab);
+    });
+}
+
+async function loadPortfolio() {
+    try {
+        const r = await fetch('/api/paper/portfolio');
+        const d = await r.json();
+        _portfolioData = d;
+
+        // Update stats
+        const fmt = v => '$' + Math.abs(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+        const sign = v => v >= 0 ? '+' : '-';
+
+        document.getElementById('s-equity').textContent   = fmt(d.total_equity);
+        document.getElementById('s-cash').textContent     = fmt(d.cash);
+        document.getElementById('s-invested').textContent = fmt(d.market_value);
+
+        const pnlEl    = document.getElementById('s-pnl');
+        const pnlPctEl = document.getElementById('s-pnlpct');
+        pnlEl.textContent   = sign(d.total_return) + fmt(d.total_return);
+        pnlEl.style.color   = d.total_return >= 0 ? 'var(--green)' : 'var(--red)';
+        pnlPctEl.textContent = (d.total_return >= 0 ? '+' : '') + d.total_return_pct + '%';
+        pnlPctEl.style.color = d.total_return >= 0 ? 'var(--green)' : 'var(--red)';
+
+        // Cache prices
+        d.positions.forEach(p => { if (p.cur_price) _priceCache[p.symbol] = p.cur_price; });
+
+        // Render positions
+        const body = document.getElementById('positions-body');
+        if (!d.positions.length) {
+            body.innerHTML = '<div class="empty-state"><div class="ei">📂</div><div>No open positions. Place a buy order to get started.</div></div>';
+            return;
+        }
+        body.innerHTML = d.positions.map(p => {
+            const pnlColor  = (p.pnl || 0) >= 0 ? 'var(--green)' : 'var(--red)';
+            const pnlStr    = p.pnl !== null ? ((p.pnl >= 0 ? '+' : '') + '$' + Math.abs(p.pnl).toFixed(2)) : '—';
+            const pnlPctStr = p.pnl_pct !== null ? ((p.pnl_pct >= 0 ? '+' : '') + p.pnl_pct.toFixed(2) + '%') : '—';
+            return `<div class="pos-row">
+                <div><span class="sym-badge">${p.symbol}</span></div>
+                <div style="font-family:var(--mono);font-size:0.75rem;">${p.quantity.toLocaleString('en-US',{maximumFractionDigits:4})}</div>
+                <div style="font-family:var(--mono);">$${p.avg_cost.toFixed(2)}</div>
+                <div style="font-family:var(--mono);">${p.cur_price ? '$'+p.cur_price.toFixed(2) : '—'}</div>
+                <div style="font-family:var(--mono);">${p.market_value ? '$'+p.market_value.toLocaleString('en-US',{minimumFractionDigits:2}) : '—'}</div>
+                <div style="font-family:var(--mono);color:${pnlColor};font-weight:700;">${pnlStr}</div>
+                <div style="font-family:var(--mono);color:${pnlColor};font-weight:700;">${pnlPctStr}</div>
+            </div>`;
+        }).join('');
+    } catch(e) {
+        document.getElementById('positions-body').innerHTML =
+            '<div class="empty-state"><div>Failed to load portfolio.</div></div>';
+    }
+}
+
+async function loadHistory() {
+    try {
+        const r = await fetch('/api/paper/history');
+        const trades = await r.json();
+
+        const body = document.getElementById('history-body');
+        if (!trades.length) {
+            body.innerHTML = '<div class="empty-state"><div class="ei">📜</div><div>No trades yet.</div></div>';
+            return;
+        }
+        body.innerHTML = trades.map(t => `
+            <div class="trade-row">
+                <div><span class="sym-badge">${t.symbol}</span></div>
+                <div><span class="${t.action === 'buy' ? 'buy-badge' : 'sell-badge'}">${t.action.toUpperCase()}</span></div>
+                <div style="font-family:var(--mono);font-size:0.75rem;">${t.quantity}</div>
+                <div style="font-family:var(--mono);">$${t.price.toFixed(2)}</div>
+                <div style="font-family:var(--mono);font-weight:700;">$${t.total.toFixed(2)}</div>
+                <div style="font-family:var(--mono);font-size:0.65rem;color:var(--text3);">${t.executed_at}</div>
+            </div>`).join('');
+    } catch(e) {}
+}
+
+// Init
+loadPortfolio();
+loadHistory();
+// Auto-update prices for preview when ticker changes
+document.getElementById('pt-ticker').addEventListener('change', updatePreview);
+</script>
+{% endblock %}
