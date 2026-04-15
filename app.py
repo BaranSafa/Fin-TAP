@@ -458,6 +458,10 @@ def api_compare():
     if t1 not in VALID_TICKERS or t2 not in VALID_TICKERS:
         return jsonify({"error": "Geçersiz ticker"}), 400
 
+    w = get_wallet()
+    if w.balance <= 0:
+        return jsonify({"error": "Yetersiz bakiye"}), 402
+
     try:
         m1 = get_suggestion_metrics(t1)
         m2 = get_suggestion_metrics(t2)
@@ -466,7 +470,17 @@ def api_compare():
         return jsonify({"error": str(e)}), 500
     if not m1 or not m2:
         return jsonify({"error": "Tahmin üretilemedi — LINEAR modeli deneyin"}), 500
+
+    w.balance -= 1
+    w.last_updated = __import__("datetime").datetime.utcnow()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        print(f"[api_compare] DB kayıt hatası: {e}")
+
     return jsonify({
+        "balance": w.balance,
         t1: {"price": m1["last_price"], "predicted": m1["predicted_price"],
              "gain":  m1["potential_gain_pct"], "rsi": m1["rsi"]},
         t2: {"price": m2["last_price"], "predicted": m2["predicted_price"],

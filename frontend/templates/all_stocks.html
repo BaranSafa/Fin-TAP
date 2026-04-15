@@ -62,7 +62,7 @@
         <a href="/predict?ticker={{ t }}" class="stock-card" data-ticker="{{ t }}">
             <div>
                 <div class="sc-ticker">{{ t }}</div>
-                <div class="sc-idx">NASDAQ</div>
+                <div class="sc-idx">{% if '-USD' in t %}CRYPTO{% else %}NASDAQ{% endif %}</div>
             </div>
             <span class="sc-arrow">→</span>
         </a>

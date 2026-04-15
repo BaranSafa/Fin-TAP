@@ -492,7 +492,7 @@
     <nav class="sidebar-nav">
         <div class="nav-section-label">ANALYSIS</div>
 
-        <a href="/" class="nav-item {% if request.endpoint == 'dashboard' %}active{% endif %}">
+        <a href="/" class="nav-item {% if request.endpoint in ('root', 'dashboard') %}active{% endif %}">
             <span class="ni">📊</span> Dashboard
         </a>
         <a href="/predict" class="nav-item {% if request.endpoint == 'predict' %}active{% endif %}">

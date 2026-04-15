@@ -322,7 +322,7 @@ async function runPrediction() {
             body: JSON.stringify({ ticker, model, features })
         });
 
-        if (!res.ok && res.headers.get('content-type')?.includes('text/html')) {
+        if (!res.ok || res.headers.get('content-type')?.includes('text/html')) {
             throw new Error('Server error — check backend logs');
         }
 
@@ -330,8 +330,10 @@ async function runPrediction() {
 
         if (data.error) { alert('⚠ ' + data.error); return; }
 
-        // Update token count
+        // Update token count (local display + topbar)
         document.getElementById('bal-display').textContent = data.balance;
+        const topbarBalance = document.getElementById('token-balance');
+        if (topbarBalance) topbarBalance.textContent = data.balance;
 
         // Fill stats
         document.getElementById('res-price').textContent   = `$${data.prediction}`;

@@ -201,6 +201,12 @@ async function doCompare() {
         const data = await res.json();
         if (data.error) throw new Error(data.error);
 
+        // Update topbar token balance
+        if (data.balance !== undefined) {
+            const tb = document.getElementById('token-balance');
+            if (tb) tb.textContent = data.balance;
+        }
+
         const d1 = data[t1], d2 = data[t2];
 
         document.getElementById('h-t1').textContent = t1;

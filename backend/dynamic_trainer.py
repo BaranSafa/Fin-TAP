@@ -106,9 +106,11 @@ def _compute_row(
     p10 = float(p[-11]) if n >= 11 else p1
     p20 = float(p[-21]) if n >= 21 else p1
 
+    p3   = float(p[-4]) if n >= 4 else p2
+
     lr1  = np.log(cur/p1)  if p1  > 0 else 0.0
     lr2  = np.log(cur/p2)  if p2  > 0 else 0.0
-    lr3  = np.log(cur/p2)  if p2  > 0 else 0.0
+    lr3  = np.log(cur/p3)  if p3  > 0 else 0.0
     lr5  = div(np.log(cur/p5)  if p5  > 0 else 0, 5)
     lr10 = div(np.log(cur/p10) if p10 > 0 else 0, 10)
     lr20 = div(np.log(cur/p20) if p20 > 0 else 0, 20)
