@@ -34,6 +34,7 @@ class User(UserMixin, db.Model):
     predictions  = db.relationship("Prediction",  backref="user", lazy=True)
     watchlist    = db.relationship("Watchlist",   backref="user", lazy=True)
     price_alerts = db.relationship("PriceAlert",  backref="user", lazy=True)
+    api_keys     = db.relationship("ApiKey",      backref="user", lazy=True)
 
 
 class Wallet(db.Model):
@@ -111,6 +112,29 @@ class PriceAlert(db.Model):
 
 
 PAPER_STARTING_CASH = 10_000.0
+
+
+class ApiKey(db.Model):
+    """
+    Developer REST API anahtarı.
+    key_prefix : ilk 12 karakter (gösterim için)
+    key_hash   : SHA-256(tam_anahtar) — DB'de ham anahtar saklanmaz
+    """
+    __tablename__ = "api_key"
+    __table_args__ = (
+        db.Index("ix_api_key_user_id", "user_id"),
+        db.Index("ix_api_key_hash",    "key_hash", unique=True),
+    )
+
+    id           = db.Column(db.Integer,     primary_key=True)
+    user_id      = db.Column(db.Integer,     db.ForeignKey("user.id"), nullable=False)
+    name         = db.Column(db.String(80),  nullable=False)
+    key_prefix   = db.Column(db.String(20),  nullable=False)   # fintap_sk_XXXX...
+    key_hash     = db.Column(db.String(64),  nullable=False, unique=True)
+    is_active    = db.Column(db.Boolean,     default=True)
+    requests_today = db.Column(db.Integer,   default=0)
+    last_used_at = db.Column(db.DateTime,    nullable=True)
+    created_at   = db.Column(db.DateTime,    default=datetime.utcnow)
 
 
 class PaperPortfolio(db.Model):

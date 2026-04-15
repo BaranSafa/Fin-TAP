@@ -21,7 +21,7 @@ V0.7 Güncellemeleri:
 """
 from __future__ import annotations
 
-import os, sys, traceback, secrets, json
+import os, sys, traceback, secrets, json, hashlib
 from datetime import datetime as _dt
 from urllib.parse import urlparse, urljoin
 from itsdangerous import URLSafeTimedSerializer, SignatureExpired, BadSignature
@@ -44,7 +44,7 @@ sys.path.insert(0, BASE_DIR)
 
 from models import (db, User, Wallet, Transaction, Prediction, Watchlist,
                     PriceAlert, PaperPortfolio, PaperPosition, PaperTrade,
-                    PAPER_STARTING_CASH)
+                    PAPER_STARTING_CASH, ApiKey)
 
 # ── Backend ────────────────────────────────────────────────────────────────
 try:
@@ -1900,6 +1900,266 @@ def reset_password(token):
         return redirect(url_for("login"))
 
     return render_template("reset_password.html", token=token)
+
+
+# ── Developer REST API ─────────────────────────────────────────────────────
+
+MAX_KEYS_PER_USER = 5
+API_DAILY_LIMIT   = 100   # ücretsiz tier günlük istek limiti
+
+
+def _hash_key(raw: str) -> str:
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _resolve_api_key() -> ApiKey | None:
+    """Authorization: Bearer <key> başlığından ApiKey kaydını döndür."""
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return None
+    raw = auth[7:].strip()
+    if not raw.startswith("fintap_sk_"):
+        return None
+    h = _hash_key(raw)
+    key_obj = ApiKey.query.filter_by(key_hash=h, is_active=True).first()
+    return key_obj
+
+
+def _api_auth_required(f):
+    """Dekoratör: Bearer token doğrulama + günlük limit kontrolü."""
+    from functools import wraps
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        key_obj = _resolve_api_key()
+        if key_obj is None:
+            return jsonify({"error": "Invalid or missing API key.",
+                            "hint": "Set 'Authorization: Bearer fintap_sk_...' header."}), 401
+        if key_obj.requests_today >= API_DAILY_LIMIT:
+            return jsonify({"error": f"Daily limit of {API_DAILY_LIMIT} requests reached."}), 429
+        # Sayacı artır
+        key_obj.requests_today += 1
+        key_obj.last_used_at   = _dt.utcnow()
+        db.session.commit()
+        # Sonraki handler'a user bilgisini geç
+        request.api_user_id = key_obj.user_id
+        return f(*args, **kwargs)
+    return decorated
+
+
+# ── Key yönetim sayfası + CRUD ──────────────────────────────────────────────
+
+@app.route("/developer")
+@login_required
+def developer_page():
+    w = get_wallet()
+    return render_template("developer.html",
+                           balance=w.balance,
+                           user=current_user,
+                           daily_limit=API_DAILY_LIMIT)
+
+
+@app.route("/api/developer/keys", methods=["GET"])
+@login_required
+@csrf.exempt
+def api_dev_keys_list():
+    keys = ApiKey.query.filter_by(user_id=current_user.id).order_by(ApiKey.created_at.desc()).all()
+    return jsonify([{
+        "id":             k.id,
+        "name":           k.name,
+        "key_prefix":     k.key_prefix,
+        "is_active":      k.is_active,
+        "requests_today": k.requests_today,
+        "last_used_at":   k.last_used_at.strftime("%Y-%m-%d %H:%M") if k.last_used_at else None,
+        "created_at":     k.created_at.strftime("%Y-%m-%d"),
+    } for k in keys])
+
+
+@app.route("/api/developer/keys", methods=["POST"])
+@login_required
+@limiter.limit("10 per hour")
+@csrf.exempt
+def api_dev_keys_create():
+    payload = request.get_json(silent=True) or {}
+    name    = str(payload.get("name", "")).strip()[:80]
+    if not name:
+        return jsonify({"error": "Key name is required."}), 400
+
+    count = ApiKey.query.filter_by(user_id=current_user.id, is_active=True).count()
+    if count >= MAX_KEYS_PER_USER:
+        return jsonify({"error": f"Maximum {MAX_KEYS_PER_USER} active keys allowed."}), 400
+
+    raw_key = "fintap_sk_" + secrets.token_urlsafe(32)
+    key_obj = ApiKey(
+        user_id    = current_user.id,
+        name       = name,
+        key_prefix = raw_key[:18] + "…",
+        key_hash   = _hash_key(raw_key),
+    )
+    db.session.add(key_obj)
+    db.session.commit()
+
+    # Ham anahtarı SADECE burada döndür — DB'ye kaydedilmez
+    return jsonify({"status": "created", "id": key_obj.id,
+                    "key": raw_key,   # göster ve unut
+                    "prefix": key_obj.key_prefix}), 201
+
+
+@app.route("/api/developer/keys/<int:kid>", methods=["DELETE"])
+@login_required
+@limiter.limit("20 per hour")
+@csrf.exempt
+def api_dev_keys_revoke(kid):
+    key_obj = ApiKey.query.filter_by(id=kid, user_id=current_user.id).first_or_404()
+    key_obj.is_active = False
+    db.session.commit()
+    return jsonify({"status": "revoked"})
+
+
+# ── Genel amaçlı API v1 ─────────────────────────────────────────────────────
+# Tüm endpoint'ler: Authorization: Bearer fintap_sk_... gerektirir
+# Rate limit: @_api_auth_required içinde günlük 100 istek
+
+@app.route("/api/v1/price/<ticker>")
+@csrf.exempt
+@limiter.limit("120 per minute")
+@_api_auth_required
+def apiv1_price(ticker):
+    """GET /api/v1/price/<ticker> — anlık kapanış fiyatı."""
+    ticker = ticker.upper()
+    if ticker not in VALID_TICKERS:
+        return jsonify({"error": "Unknown ticker."}), 404
+    try:
+        df = get_processed_data(ticker)
+        if df is None or df.empty:
+            return jsonify({"error": "No data available."}), 422
+        price  = round(float(df["Close"].iloc[-1]), 4)
+        prev   = round(float(df["Close"].iloc[-2]), 4)
+        change = round((price - prev) / prev * 100, 4)
+        return jsonify({
+            "ticker":    ticker,
+            "price":     price,
+            "prev_close": prev,
+            "change_pct": change,
+            "date":      df.index[-1].strftime("%Y-%m-%d"),
+        })
+    except Exception:
+        return jsonify({"error": "Data unavailable."}), 500
+
+
+@app.route("/api/v1/ohlc/<ticker>")
+@csrf.exempt
+@limiter.limit("60 per minute")
+@_api_auth_required
+def apiv1_ohlc(ticker):
+    """GET /api/v1/ohlc/<ticker>?days=30 — OHLCV geçmişi."""
+    ticker = ticker.upper()
+    if ticker not in VALID_TICKERS:
+        return jsonify({"error": "Unknown ticker."}), 404
+    days = min(int(request.args.get("days", 30)), 365)
+    try:
+        df = get_processed_data(ticker)
+        if df is None or df.empty:
+            return jsonify({"error": "No data available."}), 422
+        df = df.tail(days).dropna(subset=["Open","High","Low","Close"])
+        rows = [{"date":  d.strftime("%Y-%m-%d"),
+                 "open":  round(float(r["Open"]),  4),
+                 "high":  round(float(r["High"]),  4),
+                 "low":   round(float(r["Low"]),   4),
+                 "close": round(float(r["Close"]), 4),
+                 "volume": int(r["Volume"]) if "Volume" in r else None}
+                for d, r in df.iterrows()]
+        return jsonify({"ticker": ticker, "days": len(rows), "data": rows})
+    except Exception:
+        return jsonify({"error": "Data unavailable."}), 500
+
+
+@app.route("/api/v1/sentiment/<ticker>")
+@csrf.exempt
+@limiter.limit("30 per minute")
+@_api_auth_required
+def apiv1_sentiment(ticker):
+    """GET /api/v1/sentiment/<ticker> — haber sentiment analizi."""
+    ticker = ticker.upper()
+    if ticker not in VALID_TICKERS:
+        return jsonify({"error": "Unknown ticker."}), 404
+    try:
+        import feedparser
+        from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+        feed_ticker = ticker.replace("-USD", "")
+        url  = (f"https://feeds.finance.yahoo.com/rss/2.0/headline"
+                f"?s={feed_ticker}&region=US&lang=en-US")
+        feed = feedparser.parse(url)
+        analyzer = SentimentIntensityAnalyzer()
+        scores = []
+        articles = []
+        for entry in feed.entries[:6]:
+            title = (entry.get("title") or "")[:140]
+            c = analyzer.polarity_scores(title)["compound"]
+            scores.append(c)
+            articles.append({"title": title, "score": round(c, 3),
+                             "sentiment": "positive" if c >= 0.05 else ("negative" if c <= -0.05 else "neutral")})
+        avg = round(sum(scores) / len(scores), 3) if scores else 0
+        return jsonify({
+            "ticker":   ticker,
+            "overall":  "bullish" if avg >= 0.05 else ("bearish" if avg <= -0.05 else "neutral"),
+            "score":    avg,
+            "articles": articles,
+        })
+    except ImportError:
+        return jsonify({"error": "Sentiment packages not installed."}), 503
+    except Exception:
+        return jsonify({"error": "Sentiment unavailable."}), 500
+
+
+@app.route("/api/v1/predict/<ticker>")
+@csrf.exempt
+@limiter.limit("10 per minute")
+@_api_auth_required
+def apiv1_predict(ticker):
+    """
+    GET /api/v1/predict/<ticker>?model=LINEAR&horizon=14
+    1 token harcayarak ML tahmin döndürür.
+    """
+    ticker  = ticker.upper()
+    model   = request.args.get("model", "LINEAR").upper()
+    horizon = int(request.args.get("horizon", 14))
+
+    if ticker not in VALID_TICKERS:
+        return jsonify({"error": "Unknown ticker."}), 404
+    if horizon not in (7, 14, 30, 90):
+        return jsonify({"error": "horizon must be 7, 14, 30 or 90."}), 400
+
+    user_id = request.api_user_id
+    user    = db.session.get(User, user_id)
+    wallet  = Wallet.query.filter_by(user_id=user_id).first()
+    if not wallet or wallet.balance < 1:
+        return jsonify({"error": "Insufficient token balance."}), 402
+
+    try:
+        result, _ = train_and_predict_dynamic(
+            ticker, model, list(VALID_FEATURE_GROUPS), horizon=horizon
+        )
+        if result is None:
+            return jsonify({"error": "Prediction failed."}), 422
+
+        wallet.balance -= 1
+        pred_rec = Prediction(user_id=user_id, symbol=ticker,
+                              model_type=model,
+                              predicted_result=str(result.get("prediction", "")))
+        db.session.add(pred_rec)
+        db.session.commit()
+
+        return jsonify({
+            "ticker":          ticker,
+            "model":           model,
+            "horizon_days":    horizon,
+            "prediction":      result.get("prediction"),
+            "current_price":   result.get("current_price"),
+            "tokens_remaining": wallet.balance,
+        })
+    except Exception as e:
+        print(f"[apiv1_predict] {e}")
+        return jsonify({"error": "Prediction engine error."}), 500
 
 
 # ── Hata handler'ları ──────────────────────────────────────────────────────
