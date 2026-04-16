@@ -393,10 +393,34 @@
         }
 
         /* ── PRICING ── */
+        .pricing-toggle {
+            display: inline-flex;
+            background: var(--surface);
+            border: 1px solid var(--border2);
+            border-radius: 8px;
+            padding: 4px;
+            margin-top: 24px;
+            margin-bottom: 44px;
+        }
+        .ptab {
+            padding: 7px 20px; border-radius: 6px;
+            font-size: 0.78rem; font-weight: 600; cursor: pointer;
+            color: var(--text2); transition: all 0.18s; border: none;
+            background: transparent;
+        }
+        .ptab.active { background: var(--surface3); color: var(--text); }
+
         .price-grid {
             display: grid; grid-template-columns: repeat(3,1fr);
-            gap: 14px; margin-top: 48px;
+            gap: 14px;
         }
+        .pack-grid {
+            display: grid; grid-template-columns: repeat(4,1fr);
+            gap: 12px;
+        }
+        .pricing-section { display: none; }
+        .pricing-section.active { display: block; }
+
         .pc {
             background: var(--surface);
             border: 1px solid var(--border2);
@@ -448,6 +472,47 @@
         .pc-btn:hover { border-color: rgba(255,255,255,0.2); color: var(--text); }
         .pc-btn.gold { background: var(--accent); color: #09060A; border: none; }
         .pc-btn.gold:hover { background: #D4B35A; }
+
+        /* Token Pack Cards */
+        .pack-card {
+            background: var(--surface);
+            border: 1px solid var(--border2);
+            border-radius: var(--radius-lg);
+            padding: 24px 20px;
+            text-align: center;
+            position: relative;
+            transition: all 0.2s;
+            display: flex; flex-direction: column;
+        }
+        .pack-card:hover { transform: translateY(-3px); border-color: rgba(201,168,76,0.35); }
+        .pack-card.best-val { border-color: var(--accent); background: linear-gradient(160deg, rgba(201,168,76,0.05), var(--surface)); }
+        .pack-label {
+            font-family: var(--mono); font-size: 0.58rem;
+            letter-spacing: 2px; color: var(--text3);
+            text-transform: uppercase; margin-bottom: 10px;
+        }
+        .pack-tokens {
+            font-family: var(--mono); font-size: 2.8rem;
+            font-weight: 700; color: var(--accent);
+            line-height: 1; margin-bottom: 4px;
+        }
+        .pack-token-label {
+            font-size: 0.72rem; color: var(--text3); margin-bottom: 16px;
+        }
+        .pack-price {
+            font-family: var(--mono); font-size: 1.5rem;
+            font-weight: 700; color: var(--text); margin-bottom: 4px;
+        }
+        .pack-per {
+            font-size: 0.68rem; color: var(--text3); margin-bottom: 20px; flex: 1;
+        }
+        .pack-savings {
+            display: inline-block;
+            background: var(--green-dim); border: 1px solid rgba(46,204,138,0.2);
+            color: var(--green); font-family: var(--mono);
+            font-size: 0.6rem; padding: 3px 10px;
+            border-radius: 100px; margin-bottom: 16px;
+        }
 
         /* ── DATA PANEL (new element for hero) ── */
         .data-panel {
@@ -711,48 +776,106 @@
 <section class="section" id="pricing">
     <div class="sec-eyebrow">Pricing</div>
     <div class="sec-h">Simple, Transparent Pricing</div>
-    <div class="sec-p">Start free. Upgrade for unlimited predictions and advanced models.</div>
-    <div class="price-grid">
-        <div class="pc">
-            <div class="pc-eyebrow">Free</div>
-            <div class="pc-name">Starter</div>
-            <div class="pc-price">$0 <span>/ month</span></div>
-            <ul class="pc-features">
-                <li><span class="chk">✓</span> 5 tokens on signup</li>
-                <li><span class="chk">✓</span> All 31 stocks</li>
-                <li><span class="chk">✓</span> Linear &amp; Random Forest</li>
-                <li><span class="chk">✓</span> Dashboard &amp; comparison</li>
-                <li><span class="xcl">✕</span> LSTM / XGBoost / LightGBM</li>
-            </ul>
-            <a href="/register" class="pc-btn gold">Get Started Free</a>
+    <div class="sec-p">Start free with 5 tokens. Buy more as you go, or subscribe for unlimited access.</div>
+
+    <!-- Toggle -->
+    <div class="pricing-toggle">
+        <button class="ptab active" onclick="showPricing('subs', this)">Subscriptions</button>
+        <button class="ptab" onclick="showPricing('packs', this)">Token Packs</button>
+    </div>
+
+    <!-- Subscriptions -->
+    <div class="pricing-section active" id="pricing-subs">
+        <div class="price-grid">
+            <div class="pc">
+                <div class="pc-eyebrow">Free</div>
+                <div class="pc-name">Starter</div>
+                <div class="pc-price">$0 <span>/ month</span></div>
+                <ul class="pc-features">
+                    <li><span class="chk">✓</span> 5 tokens on signup</li>
+                    <li><span class="chk">✓</span> 31 stocks + 8 cryptos</li>
+                    <li><span class="chk">✓</span> Linear &amp; Random Forest</li>
+                    <li><span class="chk">✓</span> Dashboard, compare, portfolio</li>
+                    <li><span class="xcl">✕</span> XGBoost / LightGBM / LSTM</li>
+                    <li><span class="xcl">✕</span> News sentiment analysis</li>
+                </ul>
+                <a href="/register" class="pc-btn gold">Get Started Free</a>
+            </div>
+            <div class="pc featured">
+                <div class="pc-badge">MOST POPULAR</div>
+                <div class="pc-eyebrow">Pro</div>
+                <div class="pc-name" style="color:var(--accent);">Professional</div>
+                <div class="pc-price">$15 <span>/ month</span></div>
+                <ul class="pc-features">
+                    <li><span class="chk">✓</span> Unlimited tokens</li>
+                    <li><span class="chk">✓</span> All instruments</li>
+                    <li><span class="chk">✓</span> All 7 ML models</li>
+                    <li><span class="chk">✓</span> News sentiment + multi-timeframe</li>
+                    <li><span class="chk">✓</span> Backtesting engine</li>
+                    <li><span class="chk">✓</span> Price alerts &amp; paper trading</li>
+                </ul>
+                <a href="#" class="pc-btn" style="opacity:0.45;cursor:not-allowed;pointer-events:none;">Coming Soon</a>
+            </div>
+            <div class="pc">
+                <div class="pc-eyebrow">Enterprise</div>
+                <div class="pc-name">Enterprise</div>
+                <div class="pc-price">$49 <span>/ month</span></div>
+                <ul class="pc-features">
+                    <li><span class="chk">✓</span> Everything in Pro</li>
+                    <li><span class="chk">✓</span> REST API access</li>
+                    <li><span class="chk">✓</span> Custom model training</li>
+                    <li><span class="chk">✓</span> SLA &amp; priority support</li>
+                    <li><span class="chk">✓</span> White-label UI</li>
+                    <li><span class="chk">✓</span> Dedicated data pipeline</li>
+                </ul>
+                <a href="#" class="pc-btn" style="opacity:0.45;cursor:not-allowed;pointer-events:none;">Coming Soon</a>
+            </div>
         </div>
-        <div class="pc featured">
-            <div class="pc-badge">MOST POPULAR</div>
-            <div class="pc-eyebrow">Pro</div>
-            <div class="pc-name" style="color:var(--accent);">Professional</div>
-            <div class="pc-price">$15 <span>/ month</span></div>
-            <ul class="pc-features">
-                <li><span class="chk">✓</span> Unlimited tokens</li>
-                <li><span class="chk">✓</span> All S&amp;P 500 stocks</li>
-                <li><span class="chk">✓</span> All 5 ML models</li>
-                <li><span class="chk">✓</span> Priority data refresh</li>
-                <li><span class="chk">✓</span> Favorites portfolio</li>
-            </ul>
-            <a href="#" class="pc-btn" style="opacity:0.45;cursor:not-allowed;pointer-events:none;">Coming Soon</a>
+    </div>
+
+    <!-- Token Packs -->
+    <div class="pricing-section" id="pricing-packs">
+        <div class="pack-grid">
+            <div class="pack-card">
+                <div class="pack-label">Starter</div>
+                <div class="pack-tokens">10</div>
+                <div class="pack-token-label">prediction tokens</div>
+                <div class="pack-price">$2.99</div>
+                <div class="pack-per">$0.30 per prediction</div>
+                <a href="/register" class="pc-btn gold">Buy Pack</a>
+            </div>
+            <div class="pack-card">
+                <div class="pack-label">Value</div>
+                <div class="pack-tokens">50</div>
+                <div class="pack-token-label">prediction tokens</div>
+                <div class="pack-price">$9.99</div>
+                <div class="pack-per flex-1">$0.20 per prediction</div>
+                <span class="pack-savings">Save 33%</span>
+                <a href="/register" class="pc-btn gold">Buy Pack</a>
+            </div>
+            <div class="pack-card best-val">
+                <div class="pc-badge">BEST VALUE</div>
+                <div class="pack-label">Power</div>
+                <div class="pack-tokens">120</div>
+                <div class="pack-token-label">prediction tokens</div>
+                <div class="pack-price">$19.99</div>
+                <div class="pack-per">$0.17 per prediction</div>
+                <span class="pack-savings">Save 44%</span>
+                <a href="/register" class="pc-btn gold">Buy Pack</a>
+            </div>
+            <div class="pack-card">
+                <div class="pack-label">Pro</div>
+                <div class="pack-tokens">300</div>
+                <div class="pack-token-label">prediction tokens</div>
+                <div class="pack-price">$39.99</div>
+                <div class="pack-per">$0.13 per prediction</div>
+                <span class="pack-savings">Save 56%</span>
+                <a href="/register" class="pc-btn gold">Buy Pack</a>
+            </div>
         </div>
-        <div class="pc">
-            <div class="pc-eyebrow">Enterprise</div>
-            <div class="pc-name">Enterprise</div>
-            <div class="pc-price" style="font-size:1.5rem;line-height:2.8rem;">Custom</div>
-            <ul class="pc-features">
-                <li><span class="chk">✓</span> Everything in Pro</li>
-                <li><span class="chk">✓</span> Direct prediction API</li>
-                <li><span class="chk">✓</span> Custom model training</li>
-                <li><span class="chk">✓</span> SLA &amp; priority support</li>
-                <li><span class="chk">✓</span> White-label UI</li>
-            </ul>
-            <a href="#" class="pc-btn">Contact Us</a>
-        </div>
+        <p style="text-align:center;margin-top:22px;font-size:0.78rem;color:var(--text3);">
+            Tokens never expire · Secure checkout via Stripe · One token = one AI prediction
+        </p>
     </div>
 </section>
 
@@ -775,6 +898,14 @@
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
+// ── Pricing Toggle ──
+window.showPricing = (type, btn) => {
+    document.querySelectorAll('.pricing-section').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('.ptab').forEach(b => b.classList.remove('active'));
+    document.getElementById('pricing-' + type).classList.add('active');
+    btn.classList.add('active');
+};
+
 // ── Demo Chart ──
 const ctx = document.getElementById('demoChart').getContext('2d');
 const labels = [], actual = [], predicted = [];
