@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Fin-TAP{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+    <style>
+        /* ═══════════════════════════════════════
+           DESIGN SYSTEM — FIN-TAP v2.1
+        ═══════════════════════════════════════ */
+        :root {
+            --bg:        #07090d;
+            --bg2:       #0b0e14;
+            --surface:   #0f1318;
+            --surface2:  #141920;
+            --surface3:  #1a2030;
+            --border:    #1e2530;
+            --border2:   #2a3344;
+            --accent:    #00d4ff;
+            --accent-dim: rgba(0,212,255,0.08);
+            --accent-glow: rgba(0,212,255,0.25);
+            --green:     #00e676;
+            --green-dim: rgba(0,230,118,0.08);
+            --red:       #ff4560;
+            --red-dim:   rgba(255,69,96,0.08);
+            --amber:     #ffa726;
+            --amber-dim: rgba(255,167,38,0.08);
+            --purple:    #7c5cfc;
+            --purple-dim: rgba(124,92,252,0.08);
+            --text:      #dde3ee;
+            --text2:     #8896ab;
+            --text3:     #4a5568;
+            --mono:      'Space Mono', monospace;
+            --sans:      'Syne', sans-serif;
+        }
+
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html { scroll-behavior: smooth; }
+
+        body {
+            font-family: var(--sans);
+            background: var(--bg);
+            color: var(--text);
+            overflow: hidden;
+            height: 100vh;
+            display: flex;
+        }
+
+        /* ── Grid bg ── */
+        body::before {
+            content: '';
+            position: fixed; inset: 0;
+            background-image:
+                linear-gradient(rgba(0,212,255,0.025) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0,212,255,0.025) 1px, transparent 1px);
+            background-size: 48px 48px;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* ── Scrollbar ── */
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+        /* ══════════════════════════════
+           SIDEBAR
+        ══════════════════════════════ */
+        #sidebar {
+            width: 220px;
+            flex-shrink: 0;
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            position: relative;
+            z-index: 10;
+        }
+
+        .sidebar-logo {
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+            position: relative;
+        }
+        .sidebar-logo::after {
+            content: '';
+            position: absolute;
+            bottom: 0; left: 20%; right: 20%;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--accent), transparent);
+        }
+        .logo-text {
+            font-family: var(--mono);
+            font-weight: 700;
+            font-size: 0.95rem;
+            color: var(--accent);
+            letter-spacing: 3px;
+        }
+        .logo-sub {
+            font-family: var(--mono);
+            font-size: 0.48rem;
+            color: var(--text3);
+            letter-spacing: 4px;
+            margin-top: 3px;
+        }
+
+        .sidebar-nav {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px 10px;
+        }
+
+        .nav-section-label {
+            font-family: var(--mono);
+            font-size: 0.52rem;
+            letter-spacing: 3px;
+            color: var(--text3);
+            padding: 10px 8px 6px;
+            text-transform: uppercase;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 9px 10px;
+            border-radius: 7px;
+            color: var(--text2);
+            text-decoration: none;
+            font-size: 0.83rem;
+            font-weight: 600;
+            transition: all 0.15s;
+            margin-bottom: 2px;
+            border: 1px solid transparent;
+        }
+        .nav-item:hover {
+            color: var(--text);
+            background: var(--surface2);
+            border-color: var(--border);
+        }
+        .nav-item.active {
+            color: var(--accent);
+            background: var(--accent-dim);
+            border-color: rgba(0,212,255,0.2);
+        }
+        .nav-item .ni {
+            width: 28px; height: 28px;
+            border-radius: 6px;
+            background: var(--surface2);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 13px;
+            flex-shrink: 0;
+            border: 1px solid var(--border);
+        }
+        .nav-item.active .ni {
+            background: var(--accent-dim);
+            border-color: rgba(0,212,255,0.2);
+        }
+        .nav-item.danger { color: var(--red); }
+        .nav-item.danger:hover { background: var(--red-dim); border-color: rgba(255,69,96,0.2); }
+
+        .sidebar-footer {
+            padding: 12px 14px;
+            border-top: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+        .sys-status {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .status-pill {
+            display: flex; align-items: center; gap: 5px;
+            font-family: var(--mono);
+            font-size: 0.6rem;
+            color: var(--text2);
+        }
+        .status-dot {
+            width: 5px; height: 5px;
+            border-radius: 50%;
+            background: var(--green);
+            animation: glow-pulse 2s ease infinite;
+        }
+        @keyframes glow-pulse {
+            0%,100% { box-shadow: 0 0 0 0 rgba(0,230,118,0.5); }
+            50% { box-shadow: 0 0 0 3px rgba(0,230,118,0); }
+        }
+        .ver-tag {
+            font-family: var(--mono);
+            font-size: 0.55rem;
+            color: var(--text3);
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            padding: 2px 7px;
+            border-radius: 3px;
+        }
+
+        /* ══════════════════════════════
+           MAIN AREA
+        ══════════════════════════════ */
+        #main-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            height: 100vh;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* ── Topbar ── */
+        #topbar {
+            height: 60px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 24px;
+            flex-shrink: 0;
+        }
+        .topbar-left h1 {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: var(--text);
+            letter-spacing: -0.3px;
+        }
+        .topbar-left p {
+            font-family: var(--mono);
+            font-size: 0.58rem;
+            color: var(--text3);
+            letter-spacing: 1.5px;
+            margin-top: 1px;
+        }
+        .topbar-right { display: flex; align-items: center; gap: 10px; }
+
+        .token-chip {
+            display: flex; align-items: center; gap: 7px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 7px;
+            padding: 6px 12px;
+            font-family: var(--mono);
+            font-size: 0.75rem;
+            cursor: default;
+            transition: border-color 0.2s;
+        }
+        .token-chip:hover { border-color: var(--amber); }
+        .token-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--amber); }
+        .token-count { color: var(--amber); font-weight: 700; }
+        .token-label { color: var(--text3); font-size: 0.6rem; }
+        .token-buy { color: var(--accent); font-size: 0.6rem; text-decoration: none; margin-left: 2px; }
+        .token-buy:hover { text-decoration: underline; }
+
+        .user-chip {
+            display: flex; align-items: center; gap: 8px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 7px;
+            padding: 6px 12px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        .avatar {
+            width: 26px; height: 26px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--accent), var(--purple));
+            display: flex; align-items: center; justify-content: center;
+            font-size: 10px; font-weight: 800;
+            color: #000; flex-shrink: 0;
+        }
+
+        /* ── Alert banner ── */
+        .zero-alert {
+            margin: 16px 24px 0;
+            background: var(--red-dim);
+            border: 1px solid rgba(255,69,96,0.3);
+            border-radius: 8px;
+            padding: 10px 16px;
+            font-size: 0.82rem;
+            display: flex; align-items: center; gap: 10px;
+            color: #ff8fa3;
+            flex-shrink: 0;
+        }
+        .zero-alert a { color: var(--accent); }
+
+        /* ── Page content ── */
+        #page-content {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding: 24px;
+            background: var(--bg);
+        }
+
+        /* ══════════════════════════════
+           SHARED COMPONENTS
+        ══════════════════════════════ */
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            transition: border-color 0.2s;
+        }
+        .card:hover { border-color: var(--border2); }
+
+        .card-pad { padding: 20px; }
+        .card-pad-lg { padding: 28px; }
+
+        .sec-label {
+            font-family: var(--mono);
+            font-size: 0.55rem;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            color: var(--text3);
+            margin-bottom: 12px;
+        }
+
+        .badge {
+            display: inline-flex; align-items: center; gap: 5px;
+            font-family: var(--mono);
+            font-size: 0.65rem;
+            font-weight: 700;
+            letter-spacing: 1px;
+            padding: 3px 10px;
+            border-radius: 4px;
+        }
+        .badge-green  { background: var(--green-dim);  color: var(--green);  border: 1px solid rgba(0,230,118,0.2); }
+        .badge-red    { background: var(--red-dim);    color: var(--red);    border: 1px solid rgba(255,69,96,0.2); }
+        .badge-amber  { background: var(--amber-dim);  color: var(--amber);  border: 1px solid rgba(255,167,38,0.2); }
+        .badge-accent { background: var(--accent-dim); color: var(--accent); border: 1px solid rgba(0,212,255,0.2); }
+        .badge-purple { background: var(--purple-dim); color: var(--purple); border: 1px solid rgba(124,92,252,0.2); }
+
+        .btn {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 10px 20px;
+            border-radius: 7px;
+            font-family: var(--sans);
+            font-weight: 700;
+            font-size: 0.85rem;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+            text-decoration: none;
+            letter-spacing: 0.3px;
+        }
+        .btn-primary {
+            background: var(--accent);
+            color: #000;
+        }
+        .btn-primary:hover { background: #fff; transform: translateY(-1px); }
+        .btn-primary:disabled { background: var(--surface3); color: var(--text3); cursor: not-allowed; transform: none; }
+        .btn-ghost {
+            background: var(--surface2);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+        .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+        .btn-danger {
+            background: var(--red-dim);
+            color: var(--red);
+            border: 1px solid rgba(255,69,96,0.3);
+        }
+        .btn-danger:hover { background: rgba(255,69,96,0.15); }
+
+        .form-label {
+            display: block;
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: var(--text2);
+            margin-bottom: 6px;
+            letter-spacing: 0.3px;
+        }
+        .form-input, .form-select {
+            width: 100%;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 10px 14px;
+            border-radius: 7px;
+            font-size: 0.85rem;
+            font-family: var(--sans);
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .form-input:focus, .form-select:focus { border-color: var(--accent); }
+        .form-input::placeholder { color: var(--text3); }
+        .form-select { cursor: pointer; }
+        .form-select option { background: var(--surface2); }
+
+        .divider {
+            height: 1px;
+            background: var(--border);
+            margin: 20px 0;
+        }
+
+        .mono { font-family: var(--mono); }
+        .c-accent { color: var(--accent); }
+        .c-green  { color: var(--green); }
+        .c-red    { color: var(--red); }
+        .c-amber  { color: var(--amber); }
+        .c-purple { color: var(--purple); }
+        .c-muted  { color: var(--text2); }
+        .c-dim    { color: var(--text3); }
+
+        /* Skeleton */
+        @keyframes shimmer {
+            0%   { background-position: -400px 0; }
+            100% { background-position: 400px 0; }
+        }
+        .skeleton {
+            background: linear-gradient(90deg, var(--surface2) 25%, var(--surface3) 50%, var(--surface2) 75%);
+            background-size: 400px 100%;
+            animation: shimmer 1.4s ease infinite;
+            border-radius: 4px;
+        }
+
+        /* Stat row */
+        .stat-row {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 9px 0;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.82rem;
+        }
+        .stat-row:last-child { border-bottom: none; }
+        .stat-key { color: var(--text2); }
+        .stat-val { font-family: var(--mono); font-size: 0.78rem; font-weight: 700; }
+
+        /* Table */
+        .ft-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+        .ft-table thead tr { border-bottom: 1px solid var(--border2); }
+        .ft-table th {
+            text-align: left;
+            padding: 10px 14px;
+            font-family: var(--mono);
+            font-size: 0.58rem;
+            letter-spacing: 2px;
+            color: var(--text3);
+            font-weight: 400;
+            text-transform: uppercase;
+        }
+        .ft-table td { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+        .ft-table tbody tr { transition: background 0.15s; }
+        .ft-table tbody tr:hover { background: var(--surface2); }
+        .ft-table tbody tr:last-child td { border-bottom: none; }
+
+        /* Checkbox */
+        .cb-label {
+            display: flex; align-items: center; gap: 8px;
+            cursor: pointer;
+            font-size: 0.82rem;
+            color: var(--text2);
+            padding: 8px 10px;
+            border-radius: 6px;
+            border: 1px solid transparent;
+            transition: all 0.15s;
+        }
+        .cb-label:hover { background: var(--surface2); border-color: var(--border); color: var(--text); }
+        .cb-label input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; }
+
+        /* Fade in */
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(12px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        .fade-up { animation: fadeUp 0.4s ease both; }
+        .fade-up-2 { animation: fadeUp 0.4s ease 0.08s both; }
+        .fade-up-3 { animation: fadeUp 0.4s ease 0.16s both; }
+    </style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════
+     SIDEBAR
+══════════════════════════════════════════════ -->
+<aside id="sidebar">
+    <div class="sidebar-logo">
+        <div class="logo-text">▲ FIN-TAP</div>
+        <div class="logo-sub">AI FINANCIAL ANALYSIS</div>
+    </div>
+
+    <nav class="sidebar-nav">
+        <div class="nav-section-label">ANALYSIS</div>
+
+        <a href="/" class="nav-item {% if request.endpoint in ('root', 'dashboard') %}active{% endif %}">
+            <span class="ni">📊</span> Dashboard
+        </a>
+        <a href="/predict" class="nav-item {% if request.endpoint == 'predict' %}active{% endif %}">
+            <span class="ni">🤖</span> AI Forecast
+        </a>
+        <a href="/compare" class="nav-item {% if request.endpoint == 'compare' %}active{% endif %}">
+            <span class="ni">⚖️</span> Compare
+        </a>
+        <a href="/all_stocks" class="nav-item {% if request.endpoint == 'all_stocks' %}active{% endif %}">
+            <span class="ni">📋</span> All Stocks
+        </a>
+        <a href="/portfolio" class="nav-item {% if request.endpoint == 'portfolio' %}active{% endif %}">
+            <span class="ni">⭐</span> Portfolio
+        </a>
+
+        <div class="nav-section-label" style="margin-top:12px;">TOOLS</div>
+
+        <a href="/alerts" class="nav-item {% if request.endpoint == 'alerts_page' %}active{% endif %}">
+            <span class="ni">🔔</span> Price Alerts
+        </a>
+        <a href="/paper" class="nav-item {% if request.endpoint == 'paper_page' %}active{% endif %}">
+            <span class="ni">🎮</span> Paper Trading
+        </a>
+        <a href="/correlation" class="nav-item {% if request.endpoint == 'correlation_page' %}active{% endif %}">
+            <span class="ni">🔥</span> Correlation
+        </a>
+        <a href="/backtest" class="nav-item {% if request.endpoint == 'backtest_page' %}active{% endif %}">
+            <span class="ni">📈</span> Backtester
+        </a>
+
+        <a href="/developer" class="nav-item {% if request.endpoint == 'developer_page' %}active{% endif %}">
+            <span class="ni">🔌</span> API Keys
+        </a>
+
+        <div class="nav-section-label" style="margin-top:12px;">PLATFORM</div>
+
+        <a href="/prices" class="nav-item {% if request.endpoint == 'prices' %}active{% endif %}">
+            <span class="ni">💳</span> Pricing
+        </a>
+        <a href="/roadmap" class="nav-item {% if request.endpoint == 'roadmap' %}active{% endif %}">
+            <span class="ni">🗺️</span> Roadmap
+        </a>
+
+        <div class="nav-section-label" style="margin-top:12px;">ACCOUNT</div>
+
+        <a href="/profile" class="nav-item {% if request.endpoint == 'profile' %}active{% endif %}">
+            <span class="ni">👤</span> Profile
+        </a>
+        <a href="/logout" class="nav-item danger">
+            <span class="ni">🚪</span> Sign Out
+        </a>
+    </nav>
+
+    <div class="sidebar-footer">
+        <div class="sys-status">
+            <div class="status-pill">
+                <div class="status-dot"></div> ONLINE
+            </div>
+            <div class="ver-tag">v2.1</div>
+        </div>
+    </div>
+</aside>
+
+<!-- ══════════════════════════════════════════════
+     MAIN AREA
+══════════════════════════════════════════════ -->
+<div id="main-area">
+
+    <!-- Topbar -->
+    <div id="topbar">
+        <div class="topbar-left">
+            <h1>{% block header_title %}Dashboard{% endblock %}</h1>
+            <p>{% block header_sub %}FIN-TAP · AI FINANCIAL ANALYSIS PLATFORM{% endblock %}</p>
+        </div>
+        <div class="topbar-right">
+            <div class="token-chip">
+                <div class="token-dot"></div>
+                <span class="token-count" id="token-balance">{{ balance }}</span>
+                <span class="token-label">TOKENS</span>
+                {% if balance <= 2 %}
+                <a href="/prices" class="token-buy" id="token-buy-link">+ BUY</a>
+                {% endif %}
+            </div>
+            <div class="user-chip">
+                <div class="avatar">{{ user.name[0]|upper if user.name else 'U' }}</div>
+                <span>{{ user.name.split(' ')[0] if user.name else 'User' }}</span>
+            </div>
+        </div>
+    </div>
+
+    {% if balance == 0 %}
+    <div class="zero-alert">
+        <span>⚠</span>
+        <span><strong>No tokens remaining.</strong> Prediction features are locked. <a href="/prices">Purchase tokens →</a></span>
+    </div>
+    {% endif %}
+
+    <!-- Page Content -->
+    <div id="page-content">
+        {% block content %}{% endblock %}
+    </div>
+</div>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

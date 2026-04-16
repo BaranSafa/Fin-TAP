@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}All Stocks — Fin-TAP{% endblock %}
+{% block header_title %}All Tracked Instruments{% endblock %}
+{% block header_sub %}{{ stocks|length }} INSTRUMENTS · CLICK ANY TICKER TO FORECAST{% endblock %}
+
+{% block content %}
+<style>
+    .stock-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 12px 14px;
+        display: flex; align-items: center; justify-content: space-between;
+        text-decoration: none;
+        transition: all 0.15s;
+        position: relative;
+        overflow: hidden;
+    }
+    .stock-card::before {
+        content: '';
+        position: absolute; left: 0; top: 0; bottom: 0;
+        width: 3px;
+        background: var(--accent);
+        transform: scaleY(0);
+        transition: transform 0.15s;
+        border-radius: 0 2px 2px 0;
+    }
+    .stock-card:hover { border-color: rgba(0,212,255,0.25); background: var(--surface2); }
+    .stock-card:hover::before { transform: scaleY(1); }
+
+    .sc-ticker { font-family: var(--mono); font-weight: 700; font-size: 0.85rem; color: var(--accent); }
+    .sc-idx    { font-family: var(--mono); font-size: 0.6rem; color: var(--text3); }
+    .sc-arrow  { color: var(--text3); font-size: 0.8rem; transition: all 0.15s; }
+    .stock-card:hover .sc-arrow { color: var(--accent); transform: translateX(3px); }
+
+    .wl-btn {
+        position: absolute; top: 8px; right: 8px;
+        background: none; border: none; cursor: pointer;
+        font-size: 0.85rem; line-height: 1; padding: 2px;
+        opacity: 0.4; transition: all 0.15s;
+        z-index: 2;
+    }
+    .wl-btn:hover { opacity: 1; transform: scale(1.2); }
+    .wl-btn.in-wl { opacity: 1; }
+    .stock-card:hover .wl-btn { opacity: 0.7; }
+
+    .search-wrap { position: relative; margin-bottom: 16px; }
+    .search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text3); font-size: 0.85rem; }
+    #search-input {
+        width: 100%; background: var(--surface); border: 1px solid var(--border);
+        color: var(--text); padding: 10px 14px 10px 36px;
+        border-radius: 7px; font-size: 0.85rem; outline: none;
+        transition: border-color 0.2s; font-family: var(--sans);
+    }
+    #search-input:focus { border-color: var(--accent); }
+    #search-input::placeholder { color: var(--text3); }
+
+    .count-label { font-family: var(--mono); font-size: 0.65rem; color: var(--text3); margin-bottom: 12px; }
+</style>
+
+<div class="fade-up">
+    <!-- Search -->
+    <div class="search-wrap">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="search-input" placeholder="Search ticker (e.g. AAPL, TSLA...)" oninput="filterStocks()">
+    </div>
+
+    <div class="count-label">SHOWING <span id="showing-count">{{ stocks|length }}</span> OF {{ stocks|length }} INSTRUMENTS</div>
+
+    <!-- Grid -->
+    <div id="stocks-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+        {% for t in stocks %}
+        {% set in_wl = t in watchlist_symbols %}
+        <div class="stock-card" data-ticker="{{ t }}" style="cursor:default;">
+            <button class="wl-btn {% if in_wl %}in-wl{% endif %}"
+                    id="wl-btn-{{ t }}"
+                    onclick="toggleWatchlist(event, '{{ t }}')"
+                    title="{% if in_wl %}Remove from watchlist{% else %}Add to watchlist{% endif %}">
+                {% if in_wl %}⭐{% else %}☆{% endif %}
+            </button>
+            <a href="/predict?ticker={{ t }}" style="text-decoration:none;display:flex;align-items:center;justify-content:space-between;width:100%;">
+                <div>
+                    <div class="sc-ticker">{{ t }}</div>
+                    <div class="sc-idx">{% if '-USD' in t %}CRYPTO{% else %}NASDAQ{% endif %}</div>
+                </div>
+                <span class="sc-arrow">→</span>
+            </a>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Empty state -->
+    <div id="no-results" style="display:none; text-align:center; padding:48px;">
+        <div style="font-size:2rem; margin-bottom:10px;">🔍</div>
+        <div style="font-weight:700; margin-bottom:6px;">No results found</div>
+        <div style="color:var(--text2); font-size:0.82rem;">Try a different ticker symbol.</div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function filterStocks() {
+    const q     = document.getElementById('search-input').value.toUpperCase().trim();
+    const cards = document.querySelectorAll('#stocks-grid .stock-card');
+    let visible = 0;
+
+    cards.forEach(card => {
+        const match = card.dataset.ticker.includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visible++;
+    });
+
+    document.getElementById('showing-count').textContent = visible;
+    document.getElementById('no-results').style.display  = visible === 0 ? 'block' : 'none';
+}
+
+async function toggleWatchlist(event, sym) {
+    event.stopPropagation();
+    const btn = document.getElementById(`wl-btn-${sym}`);
+    const inWl = btn.classList.contains('in-wl');
+
+    btn.style.opacity = '0.4';
+    try {
+        if (inWl) {
+            const r = await fetch(`/api/watchlist/${sym}`, { method: 'DELETE' });
+            const d = await r.json();
+            if (d.error) throw new Error(d.error);
+            btn.textContent = '☆';
+            btn.classList.remove('in-wl');
+            btn.title = 'Add to watchlist';
+        } else {
+            const r = await fetch('/api/watchlist', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ symbol: sym })
+            });
+            const d = await r.json();
+            if (d.error) throw new Error(d.error);
+            btn.textContent = '⭐';
+            btn.classList.add('in-wl');
+            btn.title = 'Remove from watchlist';
+        }
+    } catch(e) {
+        console.error(e);
+    } finally {
+        btn.style.opacity = '';
+    }
+}
+</script>
+{% endblock %}

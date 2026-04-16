@@ -1,0 +1,350 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Fin-TAP{% endblock %}
+{% block header_title %}Market Command Center{% endblock %}
+{% block header_sub %}LIVE OVERVIEW · {{ stocks|length }} INSTRUMENTS TRACKED{% endblock %}
+
+{% block content %}
+<style>
+    .market-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 14px;
+        cursor: pointer;
+        transition: all 0.18s;
+        position: relative;
+        overflow: hidden;
+    }
+    .market-card::before {
+        content: ''; position: absolute;
+        top: 0; left: 0; right: 0; height: 2px;
+    }
+    .market-card.up::before  { background: var(--green); }
+    .market-card.down::before { background: var(--red); }
+    .market-card:hover { transform: translateY(-2px); border-color: var(--border2); box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
+
+    .mc-sym   { font-family: var(--mono); font-size: 0.7rem; color: var(--text3); letter-spacing: 1px; margin-bottom: 5px; }
+    .mc-price { font-family: var(--mono); font-size: 0.95rem; font-weight: 700; color: var(--text); }
+    .mc-chg   { font-family: var(--mono); font-size: 0.72rem; font-weight: 700; margin-top: 4px; }
+    .up-c   { color: var(--green); }
+    .down-c { color: var(--red); }
+
+    .action-link {
+        display: flex; align-items: center; justify-content: space-between;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 14px 16px;
+        text-decoration: none;
+        transition: all 0.18s;
+        margin-bottom: 8px;
+    }
+    .action-link:last-child { margin-bottom: 0; }
+    .action-link:hover { border-color: var(--border2); transform: translateX(3px); background: var(--surface3); }
+    .action-link:hover .al-arrow { color: var(--accent); }
+    .al-label { font-weight: 700; font-size: 0.85rem; margin-bottom: 3px; }
+    .al-desc  { font-size: 0.74rem; color: var(--text2); }
+    .al-arrow { color: var(--text3); font-size: 0.9rem; transition: color 0.18s; }
+
+    .stock-pill {
+        display: flex; align-items: center; justify-content: center;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 7px 6px;
+        font-family: var(--mono);
+        font-size: 0.68rem;
+        font-weight: 700;
+        color: var(--text2);
+        text-decoration: none;
+        transition: all 0.15s;
+        text-align: center;
+    }
+    .stock-pill:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+
+    .chart-select {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        color: var(--text);
+        padding: 5px 10px;
+        border-radius: 6px;
+        font-family: var(--mono);
+        font-size: 0.72rem;
+        outline: none;
+        cursor: pointer;
+    }
+    .chart-select:focus { border-color: var(--accent); }
+    .chart-select option { background: var(--surface2); }
+
+    .spill {
+        background: var(--surface2); border: 1px solid var(--border);
+        color: var(--text2); border-radius: 4px;
+        padding: 3px 8px; font-family: var(--mono); font-size: 0.62rem;
+        font-weight: 700; cursor: pointer; transition: all 0.12s;
+    }
+    .spill:hover { border-color: var(--accent); color: var(--accent); }
+    .spill-active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+</style>
+
+<!-- MARKET CARDS -->
+<div class="sec-label fade-up">// LIVE MARKET OVERVIEW</div>
+<div id="market-cards" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-6 fade-up">
+    {% for i in range(6) %}
+    <div class="market-card up">
+        <div class="mc-sym skeleton" style="height:10px;width:36px;margin-bottom:8px;"></div>
+        <div class="mc-price skeleton" style="height:16px;width:60px;margin-bottom:6px;"></div>
+        <div class="mc-chg skeleton" style="height:10px;width:44px;"></div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- MAIN GRID -->
+<div class="grid fade-up-2" style="grid-template-columns: 1fr 260px; gap:16px; margin-bottom:16px;">
+
+    <!-- CHART CARD -->
+    <div class="card card-pad">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+            <div>
+                <div class="sec-label" style="margin-bottom:4px;">// PRICE HISTORY · LAST 100 DAYS</div>
+                <div style="font-size:0.9rem; font-weight:700;">
+                    <span id="chart-title" class="c-accent">AAPL</span>
+                    <span class="c-muted"> Performance</span>
+                </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <input id="stock-search" type="text" placeholder="Search ticker…"
+                    style="background:var(--surface2);border:1px solid var(--border);color:var(--text);
+                           padding:5px 10px;border-radius:6px;font-family:var(--mono);font-size:0.72rem;
+                           outline:none;width:120px;transition:border-color 0.2s;"
+                    oninput="filterPills(this.value)"
+                    onfocus="this.style.borderColor='var(--accent)'"
+                    onblur="this.style.borderColor='var(--border)'">
+                <select id="ticker-select" class="chart-select">
+                    <optgroup label="── STOCKS ──">
+                    {% for t in stocks %}{% if '-USD' not in t %}
+                    <option value="{{ t }}">{{ t }}</option>
+                    {% endif %}{% endfor %}
+                    </optgroup>
+                    <optgroup label="── CRYPTO ──">
+                    {% for t in stocks %}{% if '-USD' in t %}
+                    <option value="{{ t }}">{{ t }}</option>
+                    {% endif %}{% endfor %}
+                    </optgroup>
+                </select>
+            </div>
+        </div>
+
+        <!-- Quick-pick stock pills -->
+        <div id="stock-pills" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px;">
+            {% for t in stocks %}
+            <button class="spill {% if t == 'AAPL' %}spill-active{% endif %}"
+                    data-ticker="{{ t }}" onclick="changeChart('{{ t }}')">{{ t }}</button>
+            {% endfor %}
+        </div>
+
+        <div style="position:relative; height:240px;">
+            <canvas id="mainChart"></canvas>
+        </div>
+        <div id="chart-meta" style="display:flex; gap:24px; margin-top:14px; padding-top:14px; border-top:1px solid var(--border);">
+            <div>
+                <div class="sec-label" style="margin-bottom:3px;">CURRENT</div>
+                <div id="c-current" class="mono" style="font-size:0.9rem; font-weight:700; color:var(--text);">—</div>
+            </div>
+            <div>
+                <div class="sec-label" style="margin-bottom:3px;">PERIOD HIGH</div>
+                <div id="c-high" class="mono" style="font-size:0.9rem; font-weight:700; color:var(--green);">—</div>
+            </div>
+            <div>
+                <div class="sec-label" style="margin-bottom:3px;">PERIOD LOW</div>
+                <div id="c-low" class="mono" style="font-size:0.9rem; font-weight:700; color:var(--red);">—</div>
+            </div>
+            <div>
+                <div class="sec-label" style="margin-bottom:3px;">CHANGE</div>
+                <div id="c-change" class="mono" style="font-size:0.9rem; font-weight:700;">—</div>
+            </div>
+            <div style="margin-left:auto;">
+                <a id="forecast-btn" href="/predict?ticker=AAPL"
+                   style="display:inline-flex;align-items:center;gap:6px;background:var(--accent);color:#000;
+                          font-weight:800;font-size:0.75rem;padding:6px 14px;border-radius:6px;text-decoration:none;">
+                    🤖 Forecast →
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- RIGHT COLUMN -->
+    <div style="display:flex; flex-direction:column; gap:12px;">
+
+        <!-- Quick Actions -->
+        <div class="card card-pad">
+            <div class="sec-label">// QUICK ACTIONS</div>
+            <a href="/predict" class="action-link">
+                <div>
+                    <div class="al-label" style="color:var(--accent);">🤖 AI Forecast</div>
+                    <div class="al-desc">14-day price prediction</div>
+                </div>
+                <span class="al-arrow">→</span>
+            </a>
+            <a href="/compare" class="action-link">
+                <div>
+                    <div class="al-label" style="color:var(--purple);">⚖️ Compare</div>
+                    <div class="al-desc">Side-by-side analysis</div>
+                </div>
+                <span class="al-arrow">→</span>
+            </a>
+            <a href="/all_stocks" class="action-link">
+                <div>
+                    <div class="al-label" style="color:var(--green);">📋 All Stocks</div>
+                    <div class="al-desc">Browse {{ stocks|length }} instruments</div>
+                </div>
+                <span class="al-arrow">→</span>
+            </a>
+        </div>
+
+        <!-- System Status -->
+        <div class="card card-pad">
+            <div class="sec-label">// SYSTEM</div>
+            <div class="stat-row"><span class="stat-key">Instruments</span><span class="stat-val c-accent">{{ stocks|length }}</span></div>
+            <div class="stat-row"><span class="stat-key">ML Models</span><span class="stat-val c-accent">7</span></div>
+            <div class="stat-row"><span class="stat-key">Indicators</span><span class="stat-val c-accent">25+</span></div>
+            <div class="stat-row"><span class="stat-key">Your Tokens</span><span class="stat-val c-amber">{{ balance }}</span></div>
+            <div class="stat-row"><span class="stat-key">AI Engine</span><span class="stat-val c-green">ONLINE</span></div>
+            <div class="stat-row"><span class="stat-key">Data Feed</span><span class="stat-val c-green">LIVE</span></div>
+        </div>
+    </div>
+</div>
+
+<!-- STOCK PILLS -->
+<div class="card card-pad fade-up-3">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+        <div class="sec-label" style="margin-bottom:0;">// TRACKED INSTRUMENTS — CLICK TO FORECAST</div>
+        <a href="/all_stocks" style="font-family:var(--mono); font-size:0.6rem; color:var(--accent); text-decoration:none; letter-spacing:1px;">VIEW ALL →</a>
+    </div>
+    <div class="grid grid-cols-5 sm:grid-cols-8 md:grid-cols-10 lg:grid-cols-12 gap-2">
+        {% for t in stocks %}
+        <a href="/predict?ticker={{ t }}" class="stock-pill">{{ t }}</a>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(async () => {
+    const canvas  = document.getElementById('mainChart');
+    const selEl   = document.getElementById('ticker-select');
+    const titleEl = document.getElementById('chart-title');
+    const cardsEl = document.getElementById('market-cards');
+    let chart = null;
+
+    /* ── Market Cards ── */
+    async function loadCards() {
+        try {
+            const data = await (await fetch('/api/market_summary')).json();
+            cardsEl.innerHTML = '';
+            data.forEach(item => {
+                const up  = item.trend === 'up';
+                const dir = up ? '▲' : '▼';
+                const cls = up ? 'up' : 'down';
+                const cc  = up ? 'up-c' : 'down-c';
+                cardsEl.innerHTML += `
+                    <div class="market-card ${cls}" onclick="changeChart('${item.ticker}')">
+                        <div class="mc-sym">${item.ticker}</div>
+                        <div class="mc-price">$${item.price}</div>
+                        <div class="mc-chg ${cc}">${dir} ${Math.abs(item.change)}%</div>
+                    </div>`;
+            });
+        } catch {
+            cardsEl.innerHTML = '<div style="color:var(--red);font-size:0.8rem;padding:12px;grid-column:span 6;">⚠ Market data unavailable</div>';
+        }
+    }
+
+    /* ── Chart ── */
+    async function loadChart(ticker) {
+        titleEl.textContent = ticker;
+        if (chart) chart.destroy();
+        try {
+            const data = await (await fetch(`/api/history/${ticker}`)).json();
+            if (data.error) return;
+
+            const prices = data.prices;
+            const last   = prices[prices.length - 1];
+            const first  = prices[0];
+            const high   = Math.max(...prices);
+            const low    = Math.min(...prices);
+            const change = ((last - first) / first * 100).toFixed(2);
+            const isUp   = last >= first;
+
+            document.getElementById('c-current').textContent = `$${last.toFixed(2)}`;
+            document.getElementById('c-high').textContent    = `$${high.toFixed(2)}`;
+            document.getElementById('c-low').textContent     = `$${low.toFixed(2)}`;
+            const chEl = document.getElementById('c-change');
+            chEl.textContent = `${isUp ? '+' : ''}${change}%`;
+            chEl.style.color = isUp ? 'var(--green)' : 'var(--red)';
+
+            const lineColor = isUp ? '#00e676' : '#ff4560';
+            const areaColor = isUp ? 'rgba(0,230,118,0.06)' : 'rgba(255,69,96,0.06)';
+
+            chart = new Chart(canvas.getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: data.dates,
+                    datasets: [{
+                        data: prices,
+                        borderColor: lineColor,
+                        backgroundColor: areaColor,
+                        borderWidth: 1.5,
+                        pointRadius: 0,
+                        pointHoverRadius: 3,
+                        fill: true,
+                        tension: 0.3
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: '#0f1318',
+                            borderColor: '#1e2530', borderWidth: 1,
+                            titleColor: '#8896ab', bodyColor: '#dde3ee',
+                            titleFont: { family: 'Space Mono', size: 10 },
+                            bodyFont:  { family: 'Space Mono', size: 11 },
+                            callbacks: { label: c => ` $${c.raw.toFixed(2)}` }
+                        }
+                    },
+                    scales: {
+                        x: { ticks: { color:'#4a5568', maxTicksLimit:7, font:{family:'Space Mono',size:9} }, grid:{display:false}, border:{display:false} },
+                        y: { ticks: { color:'#4a5568', font:{family:'Space Mono',size:9}, callback: v => '$'+v.toFixed(0) }, grid:{color:'rgba(255,255,255,0.03)'}, border:{display:false} }
+                    }
+                }
+            });
+        } catch(e) { console.error(e); }
+    }
+
+    window.changeChart = (t) => {
+        selEl.value = t;
+        // Update active pill
+        document.querySelectorAll('.spill').forEach(b => {
+            b.classList.toggle('spill-active', b.dataset.ticker === t);
+        });
+        // Update forecast button href
+        const fb = document.getElementById('forecast-btn');
+        if (fb) fb.href = `/predict?ticker=${t}`;
+        loadChart(t);
+    };
+    selEl.addEventListener('change', e => changeChart(e.target.value));
+
+    window.filterPills = (q) => {
+        q = q.toUpperCase().trim();
+        document.querySelectorAll('.spill').forEach(b => {
+            b.style.display = (!q || b.dataset.ticker.includes(q)) ? '' : 'none';
+        });
+    };
+
+    loadCards();
+    loadChart(selEl.value || 'AAPL');
+})();
+</script>
+{% endblock %}

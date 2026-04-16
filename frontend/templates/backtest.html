@@ -1,0 +1,512 @@
+{% extends "base.html" %}
+{% block title %}Backtester — Fin-TAP{% endblock %}
+{% block header_title %}Backtesting Engine{% endblock %}
+{% block header_sub %}RSI + TREND SIGNAL STRATEGY · HISTORICAL SIMULATION · P&L vs BUY-AND-HOLD{% endblock %}
+
+{% block content %}
+<style>
+    .bt-grid {
+        display: grid;
+        grid-template-columns: 300px 1fr;
+        gap: 16px;
+        align-items: start;
+    }
+
+    /* ── Control Panel ── */
+    .ctrl-panel {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        overflow: hidden;
+        position: sticky;
+        top: 0;
+    }
+    .ctrl-header {
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--border);
+        display: flex; align-items: center; gap: 10px;
+    }
+    .ctrl-header-icon {
+        width: 32px; height: 32px;
+        background: var(--purple-dim);
+        border: 1px solid rgba(124,92,252,0.3);
+        border-radius: 7px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 14px;
+    }
+    .ctrl-body { padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; }
+
+    .field-label {
+        font-size: 0.7rem;
+        font-weight: 700;
+        color: var(--text2);
+        letter-spacing: 0.3px;
+        margin-bottom: 5px;
+        display: block;
+    }
+
+    .pill-group { display: flex; flex-wrap: wrap; gap: 4px; }
+    .pill {
+        padding: 6px 11px;
+        border-radius: 5px;
+        border: 1px solid var(--border);
+        background: var(--surface2);
+        font-family: var(--mono);
+        font-size: 0.65rem;
+        font-weight: 700;
+        color: var(--text2);
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+    .pill:hover { border-color: var(--purple); color: var(--purple); }
+    .pill.active {
+        background: var(--purple-dim);
+        border-color: rgba(124,92,252,0.5);
+        color: var(--purple);
+    }
+
+    /* ── Results area ── */
+    .results-col { display: flex; flex-direction: column; gap: 16px; }
+
+    /* ── Stats band ── */
+    .stat-band {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 10px;
+    }
+    .stat-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 14px 12px;
+        text-align: center;
+    }
+    .stat-val {
+        font-family: var(--mono);
+        font-size: 1.1rem;
+        font-weight: 700;
+        margin-bottom: 3px;
+    }
+    .stat-lbl {
+        font-family: var(--mono);
+        font-size: 0.52rem;
+        letter-spacing: 1.5px;
+        color: var(--text3);
+        text-transform: uppercase;
+    }
+
+    /* ── Chart card ── */
+    .chart-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        overflow: hidden;
+    }
+    .chart-header {
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--border);
+        display: flex; align-items: center; justify-content: space-between;
+    }
+    .chart-title { font-weight: 700; font-size: 0.88rem; }
+    .chart-body { padding: 16px 18px; }
+
+    .legend { display: flex; align-items: center; gap: 16px; font-size: 0.75rem; }
+    .leg-item { display: flex; align-items: center; gap: 6px; color: var(--text2); }
+    .leg-dot { width: 8px; height: 8px; border-radius: 50%; }
+
+    /* ── Trades table ── */
+    .won-badge  { color: var(--green); background: var(--green-dim); border: 1px solid rgba(0,230,118,0.2); padding: 2px 8px; border-radius: 4px; font-family: var(--mono); font-size: 0.6rem; }
+    .lost-badge { color: var(--red);   background: var(--red-dim);   border: 1px solid rgba(255,69,96,0.2);  padding: 2px 8px; border-radius: 4px; font-family: var(--mono); font-size: 0.6rem; }
+    .neutral-badge { color: var(--text3); background: var(--surface3); border: 1px solid var(--border); padding: 2px 8px; border-radius: 4px; font-family: var(--mono); font-size: 0.6rem; }
+
+    /* ── Empty / loading states ── */
+    .empty-state {
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        padding: 60px 20px;
+        color: var(--text3);
+        gap: 12px;
+        text-align: center;
+    }
+    .empty-icon { font-size: 2.5rem; opacity: 0.5; }
+    .empty-title { font-size: 0.9rem; font-weight: 700; color: var(--text2); }
+    .empty-sub { font-size: 0.78rem; line-height: 1.5; max-width: 280px; }
+
+    .run-btn {
+        width: 100%;
+        background: linear-gradient(135deg, var(--purple), #5a3fcf);
+        color: #fff;
+        border: none;
+        border-radius: 7px;
+        padding: 12px;
+        font-family: var(--sans);
+        font-weight: 700;
+        font-size: 0.88rem;
+        cursor: pointer;
+        transition: all 0.2s;
+        display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    .run-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+    .run-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    .spinner {
+        width: 14px; height: 14px;
+        border: 2px solid rgba(255,255,255,0.3);
+        border-top-color: #fff;
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+        display: none;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .info-box {
+        background: var(--purple-dim);
+        border: 1px solid rgba(124,92,252,0.25);
+        border-radius: 7px;
+        padding: 10px 14px;
+        font-size: 0.77rem;
+        color: var(--text2);
+        line-height: 1.5;
+    }
+</style>
+
+<div class="bt-grid fade-up">
+
+    <!-- ── Left: Controls ── -->
+    <div class="ctrl-panel">
+        <div class="ctrl-header">
+            <div class="ctrl-header-icon">📈</div>
+            <div>
+                <div style="font-weight:800;font-size:0.88rem;">Strategy Config</div>
+                <div class="sec-label" style="margin:0;">RSI + SMA TREND SIGNAL</div>
+            </div>
+        </div>
+        <div class="ctrl-body">
+
+            <!-- Ticker -->
+            <div>
+                <label class="field-label" for="bt-ticker">Asset / Ticker</label>
+                <input id="bt-ticker" class="form-input" placeholder="e.g. AAPL, BTC-USD" value="AAPL"
+                       style="font-family:var(--mono);font-weight:700;text-transform:uppercase;" maxlength="10">
+            </div>
+
+            <!-- Horizon -->
+            <div>
+                <label class="field-label">Signal Horizon (days)</label>
+                <div class="pill-group" id="horizon-group">
+                    <div class="pill" data-val="7">7d</div>
+                    <div class="pill active" data-val="14">14d</div>
+                    <div class="pill" data-val="30">30d</div>
+                    <div class="pill" data-val="90">90d</div>
+                </div>
+            </div>
+
+            <!-- Lookback -->
+            <div>
+                <label class="field-label">Historical Period</label>
+                <div class="pill-group" id="lookback-group">
+                    <div class="pill" data-val="90">3 Mo</div>
+                    <div class="pill" data-val="180">6 Mo</div>
+                    <div class="pill active" data-val="365">1 Yr</div>
+                    <div class="pill" data-val="730">2 Yr</div>
+                </div>
+            </div>
+
+            <!-- Capital -->
+            <div>
+                <label class="field-label" for="bt-capital">Starting Capital ($)</label>
+                <input id="bt-capital" class="form-input" type="number" value="1000" min="100" max="1000000"
+                       style="font-family:var(--mono);">
+            </div>
+
+            <!-- Allow short -->
+            <label class="cb-label" style="margin-top:-4px;">
+                <input type="checkbox" id="bt-short">
+                Allow Short Selling
+            </label>
+
+            <div class="info-box">
+                Strategy buys when RSI &lt; 55 and price &gt; SMA20 &gt; SMA50 (bullish). Shorts when RSI &gt; 65 or price &lt; SMA20. Each signal holds for the chosen horizon.
+            </div>
+
+            <button class="run-btn" id="run-btn" onclick="runBacktest()">
+                <div class="spinner" id="spinner"></div>
+                <span id="btn-label">Run Backtest</span>
+            </button>
+
+        </div>
+    </div>
+
+    <!-- ── Right: Results ── -->
+    <div class="results-col" id="results-col">
+
+        <!-- Empty state -->
+        <div class="chart-card" id="empty-card">
+            <div class="empty-state">
+                <div class="empty-icon">📈</div>
+                <div class="empty-title">Configure & Run Backtest</div>
+                <div class="empty-sub">Select a ticker, horizon, and period on the left — then hit Run Backtest to simulate the strategy on historical data.</div>
+            </div>
+        </div>
+
+        <!-- Stats band (hidden until result) -->
+        <div class="stat-band" id="stats-band" style="display:none;">
+            <div class="stat-card">
+                <div class="stat-val" id="s-final">—</div>
+                <div class="stat-lbl">Final Value</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-val" id="s-ret">—</div>
+                <div class="stat-lbl">Strategy Return</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-val" id="s-bah">—</div>
+                <div class="stat-lbl">Buy & Hold</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-val" id="s-wr">—</div>
+                <div class="stat-lbl">Win Rate</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-val" id="s-dd">—</div>
+                <div class="stat-lbl">Max Drawdown</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-val" id="s-sr">—</div>
+                <div class="stat-lbl">Sharpe Ratio</div>
+            </div>
+        </div>
+
+        <!-- P&L Chart (hidden until result) -->
+        <div class="chart-card" id="chart-card" style="display:none;">
+            <div class="chart-header">
+                <div class="chart-title">Portfolio Value — Strategy vs Buy & Hold</div>
+                <div class="legend">
+                    <div class="leg-item"><div class="leg-dot" style="background:var(--purple);"></div>Strategy</div>
+                    <div class="leg-item"><div class="leg-dot" style="background:var(--text3);"></div>Buy & Hold</div>
+                </div>
+            </div>
+            <div class="chart-body">
+                <canvas id="bt-chart" height="260"></canvas>
+            </div>
+        </div>
+
+        <!-- Trades table (hidden until result) -->
+        <div class="chart-card" id="trades-card" style="display:none;">
+            <div class="chart-header">
+                <div class="chart-title">Recent Trades</div>
+                <div id="trade-summary" class="sec-label" style="margin:0;"></div>
+            </div>
+            <div style="overflow-x:auto;">
+                <table class="ft-table" id="trades-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Signal</th>
+                            <th>Entry</th>
+                            <th>Exit</th>
+                            <th>Return</th>
+                            <th>Result</th>
+                        </tr>
+                    </thead>
+                    <tbody id="trades-body"></tbody>
+                </table>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let btChart = null;
+let selectedHorizon  = 14;
+let selectedLookback = 365;
+
+// Pill group selection
+document.querySelectorAll('#horizon-group .pill').forEach(p => {
+    p.addEventListener('click', () => {
+        document.querySelectorAll('#horizon-group .pill').forEach(x => x.classList.remove('active'));
+        p.classList.add('active');
+        selectedHorizon = parseInt(p.dataset.val);
+    });
+});
+document.querySelectorAll('#lookback-group .pill').forEach(p => {
+    p.addEventListener('click', () => {
+        document.querySelectorAll('#lookback-group .pill').forEach(x => x.classList.remove('active'));
+        p.classList.add('active');
+        selectedLookback = parseInt(p.dataset.val);
+    });
+});
+
+// Ticker uppercase
+document.getElementById('bt-ticker').addEventListener('input', function() {
+    this.value = this.value.toUpperCase();
+});
+
+async function runBacktest() {
+    const ticker  = document.getElementById('bt-ticker').value.trim().toUpperCase();
+    const capital = parseFloat(document.getElementById('bt-capital').value);
+    const short   = document.getElementById('bt-short').checked;
+
+    if (!ticker) { alert('Please enter a ticker symbol.'); return; }
+    if (isNaN(capital) || capital < 100) { alert('Starting capital must be at least $100.'); return; }
+
+    // Loading state
+    const btn = document.getElementById('run-btn');
+    btn.disabled = true;
+    document.getElementById('spinner').style.display = 'block';
+    document.getElementById('btn-label').textContent  = 'Running…';
+
+    try {
+        const res = await fetch('/api/backtest/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ticker,
+                horizon:       selectedHorizon,
+                lookback_days: selectedLookback,
+                start_capital: capital,
+                allow_short:   short,
+            })
+        });
+
+        const data = await res.json();
+        if (!res.ok) { alert(data.error || 'Backtest failed.'); return; }
+
+        renderResults(data);
+    } catch(e) {
+        alert('Network error. Please try again.');
+    } finally {
+        btn.disabled = false;
+        document.getElementById('spinner').style.display = 'none';
+        document.getElementById('btn-label').textContent  = 'Run Backtest';
+    }
+}
+
+function renderResults(d) {
+    // Hide empty card, show result cards
+    document.getElementById('empty-card').style.display  = 'none';
+    document.getElementById('stats-band').style.display  = 'grid';
+    document.getElementById('chart-card').style.display  = 'block';
+    document.getElementById('trades-card').style.display = 'block';
+
+    // ── Stats ──
+    const retPos  = d.total_return >= 0;
+    const bahPos  = d.bah_return   >= 0;
+    const ddColor = d.max_drawdown > 20 ? 'var(--red)' : d.max_drawdown > 10 ? 'var(--amber)' : 'var(--green)';
+    const srColor = d.sharpe > 1 ? 'var(--green)' : d.sharpe > 0 ? 'var(--amber)' : 'var(--red)';
+
+    document.getElementById('s-final').innerHTML = `<span style="color:var(--accent)">$${fmt(d.final_value)}</span>`;
+    document.getElementById('s-ret').innerHTML   = `<span style="color:${retPos?'var(--green)':'var(--red)'}">${retPos?'+':''}${d.total_return}%</span>`;
+    document.getElementById('s-bah').innerHTML   = `<span style="color:${bahPos?'var(--green)':'var(--red)'}">${bahPos?'+':''}${d.bah_return}%</span>`;
+    document.getElementById('s-wr').innerHTML    = `<span style="color:var(--accent)">${d.win_rate}%</span>`;
+    document.getElementById('s-dd').innerHTML    = `<span style="color:${ddColor}">${d.max_drawdown}%</span>`;
+    document.getElementById('s-sr').innerHTML    = `<span style="color:${srColor}">${d.sharpe}</span>`;
+
+    document.getElementById('trade-summary').textContent =
+        `${d.win_count} wins / ${d.trade_count} trades (last 10 shown)`;
+
+    // ── Chart ──
+    const ctx = document.getElementById('bt-chart').getContext('2d');
+    if (btChart) btChart.destroy();
+
+    btChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: d.dates,
+            datasets: [
+                {
+                    label: 'Strategy',
+                    data: d.portfolio,
+                    borderColor: 'rgba(124,92,252,0.9)',
+                    backgroundColor: 'rgba(124,92,252,0.06)',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.3,
+                    fill: true,
+                },
+                {
+                    label: 'Buy & Hold',
+                    data: d.buy_and_hold,
+                    borderColor: 'rgba(255,255,255,0.2)',
+                    backgroundColor: 'transparent',
+                    borderWidth: 1.5,
+                    borderDash: [5, 4],
+                    pointRadius: 0,
+                    tension: 0.3,
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: '#0f1318',
+                    borderColor: '#1e2530',
+                    borderWidth: 1,
+                    titleColor: '#8896ab',
+                    bodyColor: '#dde3ee',
+                    callbacks: {
+                        label: ctx => ` ${ctx.dataset.label}: $${Number(ctx.raw).toFixed(2)}`
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    grid: { color: 'rgba(255,255,255,0.03)' },
+                    ticks: {
+                        color: '#4a5568',
+                        maxTicksLimit: 8,
+                        font: { family: 'Space Mono', size: 10 }
+                    }
+                },
+                y: {
+                    grid: { color: 'rgba(255,255,255,0.04)' },
+                    ticks: {
+                        color: '#4a5568',
+                        font: { family: 'Space Mono', size: 10 },
+                        callback: v => '$' + Number(v).toLocaleString()
+                    }
+                }
+            }
+        }
+    });
+
+    // ── Trades table ──
+    const tbody = document.getElementById('trades-body');
+    tbody.innerHTML = '';
+    (d.recent_trades || []).forEach(t => {
+        const retColor = t.pct_return > 0 ? 'var(--green)' : t.pct_return < 0 ? 'var(--red)' : 'var(--text3)';
+        const badge    = t.won === true
+            ? '<span class="won-badge">WIN</span>'
+            : t.won === false
+            ? '<span class="lost-badge">LOSS</span>'
+            : '<span class="neutral-badge">SKIP</span>';
+        const sigBadge = t.signal === 'long'
+            ? `<span style="color:var(--green);font-family:var(--mono);font-size:0.72rem;font-weight:700;">↑ LONG</span>`
+            : t.signal === 'short'
+            ? `<span style="color:var(--red);font-family:var(--mono);font-size:0.72rem;font-weight:700;">↓ SHORT</span>`
+            : `<span style="color:var(--text3);font-family:var(--mono);font-size:0.72rem;">– NEU</span>`;
+        tbody.insertAdjacentHTML('beforeend', `
+            <tr>
+                <td class="mono" style="font-size:0.78rem;color:var(--text2);">${t.date}</td>
+                <td>${sigBadge}</td>
+                <td class="mono" style="font-size:0.78rem;">$${t.entry}</td>
+                <td class="mono" style="font-size:0.78rem;">$${t.exit}</td>
+                <td class="mono" style="font-size:0.78rem;color:${retColor};font-weight:700;">${t.pct_return > 0?'+':''}${t.pct_return}%</td>
+                <td>${badge}</td>
+            </tr>
+        `);
+    });
+}
+
+function fmt(n) {
+    return Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+</script>
+{% endblock %}
