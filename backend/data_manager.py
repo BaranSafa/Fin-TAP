@@ -1,15 +1,43 @@
 """
 data_manager.py  —  Fin-TAP Backend
+======================================
+Bu modülün görevi: Yahoo Finance'tan ham fiyat verisi çekmek ve
+makine öğrenmesi modelleri için teknik gösterge (feature) hesaplamak.
 
-OTOMATİK GÜNCELLEME (IN-MEMORY CACHE):
-  Her ticker için son fetch zamanı hafızada tutulur.
-  Borsa açıkken: 1 saat cache → her saatte yeni veri
+── VERİ AKIŞI ──────────────────────────────────────────────────────────────
+  get_processed_data(ticker)
+       ↓
+  1. Cache kontrolü → taze ise hemen döndür
+       ↓ (bayat ise)
+  2. _download_raw() → 3 katmanlı indirme dener:
+       a) yfinance (curl_cffi ile bot koruması aşılır)
+       b) Yahoo Finance v8 API (REST)
+       c) Yahoo Finance v7 CSV indir
+       ↓ (başarılı)
+  3. _features() → ~50 teknik gösterge hesapla
+       ↓
+  4. Cache'e kaydet, DataFrame döndür
+
+── OTOMATİK GÜNCELLEME (IN-MEMORY CACHE) ──────────────────────────────────
+  Borsa açıkken:    1 saat cache → her saatte yeni veri
   Borsa kapalıyken: 6 saat cache → gereksiz API çağrısı yok
-  Render restart → cache sıfırlanır → ilk istekte taze veri çekilir
+  Render restart   → cache sıfırlanır → ilk istekte taze veri gelir
   force_refresh=True → cache'i atla, hemen güncelle
 
-requests_cache SQLite KALDIRILDI:
+── requests_cache SQLite KALDIRILDI ────────────────────────────────────────
   Render free tier disk persist etmiyor → eski veri sunuyordu
+
+── TEKNİK GÖSTERGELER SÖZLÜĞÜ ─────────────────────────────────────────────
+  lr_N   : N günlük logaritmik getiri (fiyat değişiminin daha stabil ölçümü)
+  RSI    : Relative Strength Index — momentum göstergesi (0-100)
+  MACD   : Moving Average Convergence/Divergence — trend takip göstergesi
+  BB     : Bollinger Bantları — fiyatın hareketli ortalamaya göre konumu
+  SMA/EMA: Basit / Üstel Hareketli Ortalama
+  ATR    : Average True Range — volatilite (oynaklık) ölçümü
+  Stoch  : Stochastic Oscillator — aşırı alım/satım tespiti
+  CCI    : Commodity Channel Index — trend gücü
+  ADX    : Average Directional Index — trend kuvveti
+  ROC    : Rate of Change — fiyat momentum hızı
 """
 from __future__ import annotations
 
@@ -28,7 +56,10 @@ _MEM_CACHE: dict = {}   # {ticker: {"df": DataFrame, "at": datetime}}
 
 
 def _market_open() -> bool:
-    """NYSE/NASDAQ açık mı? (America/New_York timezone — DST dahil doğru hesaplama)"""
+    """
+    NYSE/NASDAQ şu an açık mı? (America/New_York saat dilimi — yaz/kış saati dahil)
+    Hafta sonu → False. 09:30-16:00 ET aralığında → True.
+    """
     try:
         from zoneinfo import ZoneInfo
         now_et = datetime.now(tz=ZoneInfo("America/New_York"))
@@ -45,6 +76,7 @@ def _market_open() -> bool:
 
 
 def _ttl() -> int:
+    """Cache geçerlilik süresi: borsa açıkken 1 saat, kapalıyken 6 saat."""
     return 3600 if _market_open() else 6 * 3600
 
 
@@ -167,6 +199,11 @@ def _csv(ticker: str, start: str) -> Optional[pd.DataFrame]:
 
 
 def _download_raw(ticker: str, start: str) -> Optional[pd.DataFrame]:
+    """
+    Üç farklı yöntemi sırayla dener; biri başarılı olursa hemen döndürür.
+    Hepsi başarısız olursa 2 saniye bekleyip bir kez daha dener.
+    50'den az satır gelen veriyi geçersiz kabul eder (ML için yetersiz).
+    """
     for attempt in range(2):
         for fn in (_yf, _v8, _csv):
             df = fn(ticker, start)
@@ -180,6 +217,26 @@ def _download_raw(ticker: str, start: str) -> Optional[pd.DataFrame]:
 
 # ── FEATURE HESAPLAMA ─────────────────────────────────────────────────────────
 def _features(df_raw: pd.DataFrame, ticker: str) -> Optional[pd.DataFrame]:
+    """
+    Ham OHLCV verisinden ~50 teknik gösterge hesaplar.
+    ML modeli bu göstergeleri "özellik" olarak kullanır.
+
+    Çıktı sütunları:
+      lr_1..lr_20   : 1-20 günlük logaritmik getiriler
+      rsi_7/14/21   : farklı periyotlarda RSI
+      macd*         : MACD, sinyal çizgisi, histogram
+      bb_*          : Bollinger Bant pozisyonu ve genişliği
+      dist_sma*/ema*: fiyatın hareketli ortalamalardan uzaklığı
+      vol_*         : gerçekleşmiş volatilite (5/10/20 gün)
+      atr_*         : Average True Range
+      stoch_*       : Stochastic Oscillator
+      willr         : Williams %R
+      cci           : Commodity Channel Index
+      adx_*         : Directional Movement göstergeleri
+      roc_*         : Rate of Change momentum
+      v_*           : hacim göstergeleri
+      target_lr     : ertesi gün logaritmik getiri (modelin tahmin hedefi)
+    """
     try:
         df_raw.columns = [str(c).strip().lower() for c in df_raw.columns]
         df_raw = df_raw.loc[:, ~df_raw.columns.duplicated()]

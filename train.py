@@ -1,7 +1,23 @@
+"""
+train.py  —  Fin-TAP Sistem Kurulum Dosyası
+============================================
+Bu dosyanın iki görevi var:
+
+1. TICKERS_TO_TRAIN listesini tanımlar — uygulama hangi hisse/kripto
+   sembollerini desteklediğini buradan öğrenir. app.py bu listeyi import eder.
+
+2. `python train.py` olarak çalıştırıldığında her sembol için boş bir
+   placeholder .joblib dosyası oluşturur. Gerçek modeller tahmin sırasında
+   dynamic_trainer.py tarafından bellekte eğitilir; bu dosyalar sadece
+   sistemin hangi sembolleri tanıdığını kayıt altına almak içindir.
+
+Yeni bir hisse veya kripto eklemek istersen STOCKS veya CRYPTO listesine
+sembolü ekle, ardından `python train.py` komutunu bir kez çalıştır.
+"""
 import os
 import joblib
 
-# Hisse senetleri
+# ── Desteklenen hisse senetleri (Yahoo Finance sembol formatı) ───────────────
 STOCKS = [
     'AAPL', 'GOOG', 'MSFT', 'AMZN', 'TSLA', 'AMD', 'CSCO', 'ADBE',
     'PYPL', 'NVDA', 'NFLX', 'INTC', 'ORCL', 'IBM', 'CRM', 'QCOM',
@@ -9,23 +25,27 @@ STOCKS = [
     'UBER', 'LYFT', 'SPOT', 'SQ', 'SHOP', 'ETSY',
 ]
 
-# Kripto paralar — yfinance BTC-USD formatını destekler
+# ── Desteklenen kripto paralar — yfinance BTC-USD formatını kullanır ─────────
 CRYPTO = [
     'BTC-USD', 'ETH-USD', 'BNB-USD', 'SOL-USD',
     'ADA-USD', 'XRP-USD', 'DOGE-USD', 'AVAX-USD',
 ]
 
+# app.py bu listeyi import eder → hangi sembollerin geçerli olduğunu bilir
 TICKERS_TO_TRAIN = STOCKS + CRYPTO
 
 if __name__ == "__main__":
+    # models/ klasörü yoksa oluştur
     if not os.path.exists("models"):
         os.makedirs("models")
 
     print("--- Fin-TAP Sistem Başlatılıyor ---")
 
     for ticker in TICKERS_TO_TRAIN:
+        # Tire işaretini alt çizgiye çevir → dosya adı sorunsuz (örn. BTC-USD → BTC_USD)
         file_path = os.path.join("models", f"{ticker.replace('-','_')}_scaler.joblib")
         if not os.path.exists(file_path):
+            # Gerçek scaler değil, sadece "bu sembol tanınıyor" işareti olarak kaydedilir
             joblib.dump("dummy_scaler", file_path)
             print(f"  ✓ '{ticker}' sisteme eklendi.")
         else:
