@@ -144,10 +144,10 @@ def run_backtest(
 
         if signal == "long":
             trade_ret = raw_ret           # alım yaptık → fiyat artışı kâr
-            won = raw_ret > 0
+            won = bool(raw_ret > 0)
         elif signal == "short" and allow_short:
             trade_ret = -raw_ret          # açığa satış → fiyat düşüşü kâr
-            won = raw_ret < 0
+            won = bool(raw_ret < 0)
         else:
             trade_ret = 0.0               # neutral veya short izni yok → bekle
             won = None
@@ -159,7 +159,7 @@ def run_backtest(
             "signal":     signal,
             "entry":      round(float(entry), 2),
             "exit":       round(float(exit_p), 2),
-            "pct_return": round(trade_ret * 100, 2),
+            "pct_return": round(float(trade_ret) * 100, 2),
             "won":        won,
         })
 
