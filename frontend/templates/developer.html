@@ -1,0 +1,425 @@
+{% extends "base.html" %}
+{% block title %}Developer API — Fin-TAP{% endblock %}
+{% block header_title %}Developer API{% endblock %}
+{% block header_sub %}REST API · BEARER TOKEN AUTH · {{ daily_limit }} REQUESTS/DAY{% endblock %}
+
+{% block content %}
+<style>
+    .dev-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+    }
+    @media (max-width: 900px) { .dev-grid { grid-template-columns: 1fr; } }
+
+    /* ── Key cards ── */
+    .key-card {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 14px 16px; gap: 12px;
+        border-bottom: 1px solid var(--border);
+    }
+    .key-card:last-child { border-bottom: none; }
+    .key-name { font-weight: 700; font-size: 0.85rem; margin-bottom: 3px; }
+    .key-prefix {
+        font-family: var(--mono); font-size: 0.68rem; color: var(--text3);
+        background: var(--surface2); padding: 2px 8px; border-radius: 4px;
+        border: 1px solid var(--border);
+    }
+    .key-meta { font-family: var(--mono); font-size: 0.6rem; color: var(--text3); margin-top: 5px; }
+    .key-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+    .btn-revoke {
+        padding: 5px 12px; border-radius: 6px;
+        border: 1px solid var(--border); background: transparent;
+        font-family: var(--mono); font-size: 0.62rem; color: var(--text3);
+        cursor: pointer; transition: all 0.15s; letter-spacing: 0.5px;
+    }
+    .btn-revoke:hover { border-color: var(--red); color: var(--red); background: var(--red-dim); }
+
+    .status-dot {
+        width: 7px; height: 7px; border-radius: 50%;
+        display: inline-block; margin-right: 5px;
+    }
+    .dot-active   { background: var(--green); box-shadow: 0 0 4px rgba(0,230,118,0.5); }
+    .dot-inactive { background: var(--text3); }
+
+    /* ── Create form ── */
+    .create-form { display: flex; gap: 8px; align-items: flex-end; }
+    .btn-create {
+        background: var(--accent); color: #000;
+        border: none; border-radius: 7px; padding: 9px 18px;
+        font-family: var(--sans); font-weight: 800; font-size: 0.85rem;
+        cursor: pointer; transition: all 0.2s; white-space: nowrap; letter-spacing: 0.5px;
+    }
+    .btn-create:hover:not(:disabled) { background: #fff; }
+    .btn-create:disabled { opacity: 0.5; cursor: default; }
+
+    /* ── Key reveal box ── */
+    .key-reveal {
+        background: rgba(0,230,118,0.05);
+        border: 1px solid rgba(0,230,118,0.3);
+        border-radius: 8px; padding: 14px 16px;
+        display: none; margin-top: 12px;
+    }
+    .key-reveal .kr-label {
+        font-family: var(--mono); font-size: 0.6rem; color: var(--green);
+        letter-spacing: 1.5px; margin-bottom: 8px;
+    }
+    .key-reveal .kr-key {
+        font-family: var(--mono); font-size: 0.78rem; color: var(--text);
+        word-break: break-all; background: var(--surface2);
+        padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border);
+        display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    }
+    .btn-copy {
+        background: var(--surface); border: 1px solid var(--border);
+        color: var(--text2); border-radius: 5px; padding: 4px 10px;
+        font-family: var(--mono); font-size: 0.6rem; cursor: pointer;
+        transition: all 0.15s; white-space: nowrap; flex-shrink: 0;
+    }
+    .btn-copy:hover { border-color: var(--accent); color: var(--accent); }
+    .kr-warn { font-size: 0.75rem; color: var(--amber); margin-top: 8px; }
+
+    /* ── Docs ── */
+    .endpoint-block {
+        background: var(--surface2); border: 1px solid var(--border);
+        border-radius: 8px; margin-bottom: 10px; overflow: hidden;
+    }
+    .ep-head {
+        display: flex; align-items: center; gap: 10px;
+        padding: 10px 14px; cursor: pointer;
+        transition: background 0.15s;
+    }
+    .ep-head:hover { background: rgba(255,255,255,0.03); }
+    .method-badge {
+        font-family: var(--mono); font-weight: 700; font-size: 0.62rem;
+        padding: 2px 8px; border-radius: 4px; letter-spacing: 0.5px;
+    }
+    .method-get { background: rgba(0,212,255,0.12); color: var(--accent); border: 1px solid rgba(0,212,255,0.2); }
+    .ep-path { font-family: var(--mono); font-size: 0.8rem; color: var(--text); font-weight: 700; }
+    .ep-desc { font-size: 0.75rem; color: var(--text2); margin-left: auto; }
+    .ep-body {
+        padding: 12px 14px; border-top: 1px solid var(--border);
+        display: none; font-size: 0.78rem; color: var(--text2); line-height: 1.7;
+    }
+    .ep-body.open { display: block; }
+    .ep-body table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+    .ep-body th { font-family: var(--mono); font-size: 0.6rem; color: var(--text3); text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+    .ep-body td { padding: 5px 8px; font-family: var(--mono); font-size: 0.72rem; border-bottom: 1px solid rgba(30,37,48,0.4); }
+    .ep-body td:first-child { color: var(--accent); }
+    .ep-body td:last-child { color: var(--text2); }
+
+    .code-block {
+        background: #060810; border: 1px solid var(--border);
+        border-radius: 6px; padding: 12px 14px;
+        font-family: var(--mono); font-size: 0.72rem; color: var(--text);
+        overflow-x: auto; margin: 8px 0; line-height: 1.6; white-space: pre;
+    }
+    .code-comment { color: var(--text3); }
+    .code-key     { color: var(--accent); }
+    .code-str     { color: var(--green); }
+    .code-num     { color: var(--amber); }
+
+    .error-box   { background: rgba(255,69,96,0.08); border: 1px solid rgba(255,69,96,0.25); border-radius:7px; padding:10px 14px; font-size:0.8rem; color:#ff8fa3; display:none; margin-top:10px; }
+    .success-box { background: rgba(0,230,118,0.08); border: 1px solid rgba(0,230,118,0.25); border-radius:7px; padding:10px 14px; font-size:0.8rem; color:var(--green); display:none; margin-top:10px; }
+
+    .empty-state { padding:32px 20px; text-align:center; color:var(--text3); font-family:var(--mono); font-size:0.7rem; }
+</style>
+
+<div class="fade-up">
+<div class="dev-grid">
+
+    <!-- ── LEFT: Key Management ── -->
+    <div style="display:flex; flex-direction:column; gap:14px;">
+
+        <!-- Create new key -->
+        <div class="card card-pad">
+            <div class="sec-label">// CREATE API KEY</div>
+            <div class="create-form">
+                <div style="flex:1;">
+                    <label class="form-label">Key Name</label>
+                    <input id="key-name" class="form-input" type="text"
+                           maxlength="80" placeholder="e.g. My App, Bot v2">
+                </div>
+                <button class="btn-create" id="create-btn" onclick="createKey()">+ CREATE</button>
+            </div>
+            <div class="error-box"   id="create-error"></div>
+            <div class="success-box" id="create-ok"></div>
+
+            <!-- Key reveal (shown once after creation) -->
+            <div class="key-reveal" id="key-reveal">
+                <div class="kr-label">✓ KEY CREATED — COPY NOW</div>
+                <div class="kr-key">
+                    <span id="revealed-key" style="word-break:break-all;"></span>
+                    <button class="btn-copy" onclick="copyKey()">COPY</button>
+                </div>
+                <div class="kr-warn">⚠ This key will only be shown once. Store it securely.</div>
+            </div>
+        </div>
+
+        <!-- Key list -->
+        <div class="card" style="overflow:hidden;">
+            <div style="padding:12px 16px; border-bottom:1px solid var(--border);
+                        display:flex; align-items:center; justify-content:space-between;">
+                <div class="sec-label" style="margin-bottom:0;">// YOUR API KEYS</div>
+                <span style="font-family:var(--mono); font-size:0.62rem; color:var(--text3);" id="key-count">—</span>
+            </div>
+            <div id="keys-list">
+                <div class="empty-state">Loading…</div>
+            </div>
+        </div>
+
+        <!-- Stats / Limits -->
+        <div class="card card-pad" style="font-size:0.78rem; color:var(--text2); line-height:1.7;">
+            <div class="sec-label">// LIMITS</div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:6px;">
+                <div style="background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:10px 12px;">
+                    <div style="font-family:var(--mono);font-size:1.1rem;font-weight:700;color:var(--accent);">{{ daily_limit }}</div>
+                    <div style="font-size:0.65rem;color:var(--text3);">REQUESTS / DAY</div>
+                </div>
+                <div style="background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:10px 12px;">
+                    <div style="font-family:var(--mono);font-size:1.1rem;font-weight:700;color:var(--accent);">5</div>
+                    <div style="font-size:0.65rem;color:var(--text3);">MAX KEYS</div>
+                </div>
+            </div>
+            <p style="margin-top:10px; color:var(--text3); font-family:var(--mono); font-size:0.65rem;">
+                Predict endpoint costs 1 token per call from your wallet balance.
+                Daily counters reset at 00:00 UTC.
+            </p>
+        </div>
+
+    </div>
+
+    <!-- ── RIGHT: API Documentation ── -->
+    <div style="display:flex; flex-direction:column; gap:14px;">
+        <div class="card card-pad">
+            <div class="sec-label">// AUTHENTICATION</div>
+            <p style="font-size:0.8rem; color:var(--text2); margin-bottom:10px;">
+                All endpoints require a Bearer token in the <code style="font-family:var(--mono);color:var(--accent);">Authorization</code> header.
+            </p>
+            <div class="code-block"><span class="code-comment"># Example request</span>
+curl https://your-domain.com/api/v1/price/AAPL \
+  -H <span class="code-str">"Authorization: Bearer fintap_sk_..."</span></div>
+        </div>
+
+        <div class="card card-pad">
+            <div class="sec-label">// ENDPOINTS</div>
+
+            <!-- Price -->
+            <div class="endpoint-block">
+                <div class="ep-head" onclick="toggleEp(this)">
+                    <span class="method-badge method-get">GET</span>
+                    <span class="ep-path">/api/v1/price/{ticker}</span>
+                    <span class="ep-desc">Current price</span>
+                    <span style="margin-left:8px;color:var(--text3);font-size:0.8rem;">▾</span>
+                </div>
+                <div class="ep-body">
+                    <p>Returns the latest closing price and daily change for a ticker.</p>
+                    <div class="code-block">{
+  <span class="code-key">"ticker"</span>:     <span class="code-str">"AAPL"</span>,
+  <span class="code-key">"price"</span>:      <span class="code-num">213.49</span>,
+  <span class="code-key">"prev_close"</span>: <span class="code-num">210.32</span>,
+  <span class="code-key">"change_pct"</span>: <span class="code-num">1.507</span>,
+  <span class="code-key">"date"</span>:       <span class="code-str">"2025-04-14"</span>
+}</div>
+                </div>
+            </div>
+
+            <!-- OHLC -->
+            <div class="endpoint-block">
+                <div class="ep-head" onclick="toggleEp(this)">
+                    <span class="method-badge method-get">GET</span>
+                    <span class="ep-path">/api/v1/ohlc/{ticker}</span>
+                    <span class="ep-desc">Historical OHLCV</span>
+                    <span style="margin-left:8px;color:var(--text3);font-size:0.8rem;">▾</span>
+                </div>
+                <div class="ep-body">
+                    <table>
+                        <tr><th>PARAM</th><th>DEFAULT</th><th>DESCRIPTION</th></tr>
+                        <tr><td>days</td><td>30</td><td>Number of days (max 365)</td></tr>
+                    </table>
+                    <div class="code-block">{
+  <span class="code-key">"ticker"</span>: <span class="code-str">"AAPL"</span>,
+  <span class="code-key">"days"</span>:   <span class="code-num">30</span>,
+  <span class="code-key">"data"</span>: [
+    { <span class="code-key">"date"</span>: <span class="code-str">"2025-03-01"</span>, <span class="code-key">"open"</span>: <span class="code-num">210.1</span>, <span class="code-key">"high"</span>: <span class="code-num">215.0</span>,
+      <span class="code-key">"low"</span>: <span class="code-num">209.5</span>, <span class="code-key">"close"</span>: <span class="code-num">213.4</span>, <span class="code-key">"volume"</span>: <span class="code-num">52341200</span> }
+  ]
+}</div>
+                </div>
+            </div>
+
+            <!-- Sentiment -->
+            <div class="endpoint-block">
+                <div class="ep-head" onclick="toggleEp(this)">
+                    <span class="method-badge method-get">GET</span>
+                    <span class="ep-path">/api/v1/sentiment/{ticker}</span>
+                    <span class="ep-desc">News sentiment</span>
+                    <span style="margin-left:8px;color:var(--text3);font-size:0.8rem;">▾</span>
+                </div>
+                <div class="ep-body">
+                    <p>Yahoo Finance RSS headlines analysed with VADER.</p>
+                    <div class="code-block">{
+  <span class="code-key">"ticker"</span>:  <span class="code-str">"TSLA"</span>,
+  <span class="code-key">"overall"</span>: <span class="code-str">"bullish"</span>,
+  <span class="code-key">"score"</span>:   <span class="code-num">0.312</span>,
+  <span class="code-key">"articles"</span>: [
+    { <span class="code-key">"title"</span>: <span class="code-str">"Tesla beats Q1 estimates"</span>,
+      <span class="code-key">"score"</span>: <span class="code-num">0.68</span>, <span class="code-key">"sentiment"</span>: <span class="code-str">"positive"</span> }
+  ]
+}</div>
+                </div>
+            </div>
+
+            <!-- Predict -->
+            <div class="endpoint-block">
+                <div class="ep-head" onclick="toggleEp(this)">
+                    <span class="method-badge method-get">GET</span>
+                    <span class="ep-path">/api/v1/predict/{ticker}</span>
+                    <span class="ep-desc">ML forecast — costs 1 token</span>
+                    <span style="margin-left:8px;color:var(--text3);font-size:0.8rem;">▾</span>
+                </div>
+                <div class="ep-body">
+                    <table>
+                        <tr><th>PARAM</th><th>DEFAULT</th><th>OPTIONS</th></tr>
+                        <tr><td>model</td><td>LINEAR</td><td>LINEAR, RANDOM_FOREST, XGBOOST, LSTM, …</td></tr>
+                        <tr><td>horizon</td><td>14</td><td>7, 14, 30, 90</td></tr>
+                    </table>
+                    <div class="code-block">{
+  <span class="code-key">"ticker"</span>:           <span class="code-str">"NVDA"</span>,
+  <span class="code-key">"model"</span>:            <span class="code-str">"XGBOOST"</span>,
+  <span class="code-key">"horizon_days"</span>:     <span class="code-num">14</span>,
+  <span class="code-key">"prediction"</span>:       <span class="code-num">892.40</span>,
+  <span class="code-key">"current_price"</span>:    <span class="code-num">875.10</span>,
+  <span class="code-key">"tokens_remaining"</span>: <span class="code-num">47</span>
+}</div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Error codes -->
+        <div class="card card-pad" style="font-size:0.78rem; color:var(--text2);">
+            <div class="sec-label">// HTTP STATUS CODES</div>
+            <table style="width:100%; border-collapse:collapse; margin-top:6px;">
+                <tr><th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:0.6rem;color:var(--text3);">CODE</th>
+                    <th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:0.6rem;color:var(--text3);">MEANING</th></tr>
+                <tr><td style="padding:5px 8px;font-family:var(--mono);color:var(--green);">200</td><td style="padding:5px 8px;">OK</td></tr>
+                <tr><td style="padding:5px 8px;font-family:var(--mono);color:var(--amber);">401</td><td style="padding:5px 8px;">Missing or invalid API key</td></tr>
+                <tr><td style="padding:5px 8px;font-family:var(--mono);color:var(--amber);">402</td><td style="padding:5px 8px;">Insufficient token balance (predict)</td></tr>
+                <tr><td style="padding:5px 8px;font-family:var(--mono);color:var(--amber);">404</td><td style="padding:5px 8px;">Unknown ticker</td></tr>
+                <tr><td style="padding:5px 8px;font-family:var(--mono);color:var(--red);">429</td><td style="padding:5px 8px;">Daily request limit reached</td></tr>
+                <tr><td style="padding:5px 8px;font-family:var(--mono);color:var(--red);">500</td><td style="padding:5px 8px;">Server / data error</td></tr>
+            </table>
+        </div>
+
+    </div>
+</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const CSRF = () => document.cookie.split('; ').find(r => r.startsWith('csrf_token='))?.split('=')[1] || '';
+
+function toggleEp(head) {
+    const body = head.nextElementSibling;
+    const arrow = head.querySelector('span:last-child');
+    body.classList.toggle('open');
+    arrow.textContent = body.classList.contains('open') ? '▴' : '▾';
+}
+
+async function createKey() {
+    const name = document.getElementById('key-name').value.trim();
+    const errEl = document.getElementById('create-error');
+    const okEl  = document.getElementById('create-ok');
+    errEl.style.display = 'none';
+    okEl.style.display  = 'none';
+    document.getElementById('key-reveal').style.display = 'none';
+
+    if (!name) { errEl.textContent = '⚠ Enter a name for this key.'; errEl.style.display = 'block'; return; }
+
+    const btn = document.getElementById('create-btn');
+    btn.disabled = true; btn.textContent = 'Creating…';
+
+    try {
+        const r = await fetch('/api/developer/keys', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF() },
+            body: JSON.stringify({ name }),
+        });
+        const d = await r.json();
+        if (!r.ok || d.error) { errEl.textContent = '⚠ ' + (d.error || 'Failed.'); errEl.style.display = 'block'; return; }
+
+        document.getElementById('revealed-key').textContent = d.key;
+        document.getElementById('key-reveal').style.display = 'block';
+        document.getElementById('key-name').value = '';
+        loadKeys();
+    } catch(e) {
+        errEl.textContent = '⚠ Network error.'; errEl.style.display = 'block';
+    } finally {
+        btn.disabled = false; btn.textContent = '+ CREATE';
+    }
+}
+
+function copyKey() {
+    const key = document.getElementById('revealed-key').textContent;
+    navigator.clipboard.writeText(key).then(() => {
+        const btn = document.querySelector('.btn-copy');
+        btn.textContent = 'COPIED!';
+        setTimeout(() => btn.textContent = 'COPY', 2000);
+    });
+}
+
+async function revokeKey(id) {
+    if (!confirm('Revoke this API key? It will stop working immediately.')) return;
+    try {
+        await fetch(`/api/developer/keys/${id}`, {
+            method: 'DELETE', headers: { 'X-CSRFToken': CSRF() },
+        });
+        loadKeys();
+    } catch(e) {}
+}
+
+async function loadKeys() {
+    try {
+        const r = await fetch('/api/developer/keys');
+        const keys = await r.json();
+
+        const countEl = document.getElementById('key-count');
+        const active = keys.filter(k => k.is_active).length;
+        countEl.textContent = `${active} active · ${keys.length} total`;
+
+        const list = document.getElementById('keys-list');
+        if (!keys.length) {
+            list.innerHTML = '<div class="empty-state">No API keys yet. Create one above.</div>';
+            return;
+        }
+        list.innerHTML = keys.map(k => `
+            <div class="key-card">
+                <div>
+                    <div class="key-name">
+                        <span class="status-dot ${k.is_active ? 'dot-active' : 'dot-inactive'}"></span>
+                        ${k.name}
+                    </div>
+                    <div style="margin-top:4px;">
+                        <span class="key-prefix">${k.key_prefix}</span>
+                    </div>
+                    <div class="key-meta">
+                        Created ${k.created_at}
+                        ${k.last_used_at ? '· Last used ' + k.last_used_at : '· Never used'}
+                        · ${k.requests_today} req today
+                    </div>
+                </div>
+                <div class="key-actions">
+                    ${k.is_active ? `<button class="btn-revoke" onclick="revokeKey(${k.id})">REVOKE</button>` : '<span style="font-family:var(--mono);font-size:0.62rem;color:var(--text3);">REVOKED</span>'}
+                </div>
+            </div>`).join('');
+    } catch(e) {
+        document.getElementById('keys-list').innerHTML = '<div class="empty-state">Failed to load keys.</div>';
+    }
+}
+
+loadKeys();
+</script>
+{% endblock %}

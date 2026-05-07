@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+{% block title %}Pricing — Fin-TAP{% endblock %}
+{% block header_title %}Pricing & Plans{% endblock %}
+{% block header_sub %}SIMPLE · TRANSPARENT · PAY-PER-PREDICTION OR MONTHLY SUBSCRIPTION{% endblock %}
+
+{% block content %}
+<style>
+    .pricing-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; max-width:900px; margin:0 auto 40px; }
+    .price-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:28px; display:flex; flex-direction:column; position:relative; transition:all 0.2s; }
+    .price-card:hover { transform:translateY(-3px); }
+    .price-card.featured { border-color:var(--accent); background:linear-gradient(160deg,rgba(0,212,255,0.04),var(--surface)); }
+    .plan-label { font-family:var(--mono); font-size:0.6rem; letter-spacing:3px; color:var(--text3); margin-bottom:10px; }
+    .plan-name { font-size:1.2rem; font-weight:800; margin-bottom:4px; }
+    .plan-desc { font-size:0.78rem; color:var(--text2); margin-bottom:20px; line-height:1.5; }
+    .plan-price { font-family:var(--mono); font-size:2.5rem; font-weight:700; margin-bottom:20px; }
+    .plan-price span { font-size:0.75rem; color:var(--text2); margin-left:4px; }
+    .plan-features { flex:1; list-style:none; margin-bottom:20px; }
+    .plan-features li { display:flex; align-items:center; gap:10px; font-size:0.82rem; color:var(--text2); padding:7px 0; border-bottom:1px solid var(--border); }
+    .plan-features li:last-child { border-bottom:none; }
+    .pf-check { color:var(--green); } .pf-x { color:var(--text3); }
+    .hot-tag { position:absolute; top:-11px; left:50%; transform:translateX(-50%); background:var(--accent); color:#000; font-family:var(--mono); font-size:0.6rem; font-weight:700; letter-spacing:2px; padding:3px 14px; border-radius:100px; white-space:nowrap; }
+    .pack-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-top:16px; }
+    .pack-card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:20px; text-align:center; transition:all 0.2s; position:relative; }
+    .pack-card { cursor:pointer; }
+    .pack-card:hover { border-color:var(--accent); transform:translateY(-2px); }
+    .pack-buy-btn {
+        margin-top:14px; width:100%;
+        background:var(--accent); color:#000;
+        border:none; border-radius:6px;
+        font-family:var(--mono); font-size:0.68rem; font-weight:700; letter-spacing:1px;
+        padding:9px 0; cursor:pointer; transition:all 0.2s;
+    }
+    .pack-buy-btn:hover   { background:#fff; }
+    .pack-buy-btn:disabled { background:var(--surface3); color:var(--text3); cursor:not-allowed; }
+    .pack-best { position:absolute; top:8px; right:8px; font-family:var(--mono); font-size:0.5rem; color:var(--amber); letter-spacing:1px; }
+    .pack-tokens { font-family:var(--mono); font-size:1.8rem; font-weight:700; color:var(--amber); margin-bottom:4px; }
+    .pack-label  { font-size:0.72rem; color:var(--text2); margin-bottom:12px; }
+    .pack-price  { font-family:var(--mono); font-size:1rem; font-weight:700; margin-bottom:4px; }
+    .pack-unit   { font-size:0.7rem; color:var(--text3); }
+    .faq-item { border-bottom:1px solid var(--border); padding:16px 0; }
+    .faq-item:last-child { border-bottom:none; }
+    .faq-q { font-weight:700; font-size:0.88rem; margin-bottom:6px; }
+    .faq-a { font-size:0.8rem; color:var(--text2); line-height:1.6; }
+</style>
+
+<!-- Intro -->
+<div style="text-align:center; margin-bottom:36px;" class="fade-up">
+    <div class="sec-label" style="text-align:center;">// SUBSCRIPTION PLANS</div>
+    <div style="font-size:1.5rem; font-weight:800; margin-bottom:8px;">Find Your Plan</div>
+    <div style="color:var(--text2); font-size:0.88rem; max-width:520px; margin:0 auto;">
+        Fin-TAP runs on a token economy. Each AI prediction costs 1 token. Buy one-time packs or subscribe monthly — start free, upgrade anytime.
+    </div>
+</div>
+
+<!-- Plans -->
+<div class="pricing-grid fade-up">
+
+    <div class="price-card">
+        <div class="plan-label">// FREE</div>
+        <div class="plan-name">Starter</div>
+        <div class="plan-desc">Explore the platform with complimentary tokens on signup.</div>
+        <div class="plan-price">$0 <span>/ month</span></div>
+        <ul class="plan-features">
+            <li><span class="pf-check">✓</span> 5 tokens on registration</li>
+            <li><span class="pf-check">✓</span> 31 stocks + 8 crypto assets</li>
+            <li><span class="pf-check">✓</span> Ridge & Random Forest models</li>
+            <li><span class="pf-check">✓</span> Dashboard & comparison</li>
+            <li><span class="pf-x">✕</span> XGBoost / LightGBM / LSTM</li>
+            <li><span class="pf-x">✕</span> Priority data refresh</li>
+        </ul>
+        <div class="btn btn-ghost" style="text-align:center; justify-content:center; display:flex; opacity:0.6; cursor:default;">Current Plan</div>
+    </div>
+
+    <div class="price-card featured">
+        <div class="hot-tag">MOST POPULAR</div>
+        <div class="plan-label">// PRO</div>
+        <div class="plan-name" style="color:var(--accent);">Professional</div>
+        <div class="plan-desc">200 tokens every month — all advanced ML models and crypto unlocked.</div>
+        <div class="plan-price">$15 <span>/ month</span></div>
+        <ul class="plan-features">
+            <li><span class="pf-check">✓</span> 200 tokens / month</li>
+            <li><span class="pf-check">✓</span> All stocks + all crypto</li>
+            <li><span class="pf-check">✓</span> All 7 ML models incl. LSTM</li>
+            <li><span class="pf-check">✓</span> Priority data refresh</li>
+            <li><span class="pf-check">✓</span> Favorites portfolio</li>
+            <li><span class="pf-check">✓</span> Prediction accuracy history</li>
+        </ul>
+        <button class="pack-buy-btn" id="sub-pro-btn" onclick="subscribePlan('pro_monthly', this)"
+                style="font-size:0.72rem; letter-spacing:1px;">
+            SUBSCRIBE $15/MO →
+        </button>
+    </div>
+
+    <div class="price-card">
+        <div class="plan-label">// ENTERPRISE</div>
+        <div class="plan-name">Enterprise</div>
+        <div class="plan-desc">999 tokens monthly plus API access and white-label deployment for teams.</div>
+        <div class="plan-price">$49.99 <span>/ month</span></div>
+        <ul class="plan-features">
+            <li><span class="pf-check">✓</span> 999 tokens / month</li>
+            <li><span class="pf-check">✓</span> Direct prediction API</li>
+            <li><span class="pf-check">✓</span> Custom model training</li>
+            <li><span class="pf-check">✓</span> SLA & priority support</li>
+            <li><span class="pf-check">✓</span> White-label UI</li>
+            <li><span class="pf-check">✓</span> Multi-seat accounts</li>
+        </ul>
+        <button class="pack-buy-btn" id="sub-ent-btn" onclick="subscribePlan('enterprise_monthly', this)"
+                style="font-size:0.72rem; letter-spacing:1px; background:var(--purple);">
+            SUBSCRIBE $49.99/MO →
+        </button>
+    </div>
+
+</div>
+
+<!-- Token Packs -->
+<div style="max-width:900px; margin:0 auto;" class="fade-up-2">
+    <div class="sec-label" style="text-align:center;">// ONE-TIME TOKEN PACKS</div>
+    <div style="text-align:center; font-size:0.82rem; color:var(--text2); margin-bottom:0;">No subscription needed — buy tokens as you go.</div>
+    <div class="pack-grid">
+        <div class="pack-card">
+            <div class="pack-tokens">20</div>
+            <div class="pack-label">Starter Pack</div>
+            <div class="pack-price">$2.99</div>
+            <div class="pack-unit">$0.15 / token</div>
+            <button class="pack-buy-btn" onclick="buyPack('starter', this)">BUY NOW →</button>
+        </div>
+        <div class="pack-card">
+            <div class="pack-tokens">50</div>
+            <div class="pack-label">Explorer Pack</div>
+            <div class="pack-price">$5.99</div>
+            <div class="pack-unit">$0.12 / token</div>
+            <button class="pack-buy-btn" onclick="buyPack('explorer', this)">BUY NOW →</button>
+        </div>
+        <div class="pack-card">
+            <div class="pack-best">BEST VALUE</div>
+            <div class="pack-tokens">100</div>
+            <div class="pack-label">Pro Pack</div>
+            <div class="pack-price">$9.99</div>
+            <div class="pack-unit">$0.10 / token</div>
+            <button class="pack-buy-btn" onclick="buyPack('pro', this)">BUY NOW →</button>
+        </div>
+        <div class="pack-card">
+            <div class="pack-tokens">500</div>
+            <div class="pack-label">Whale Pack</div>
+            <div class="pack-price">$39.99</div>
+            <div class="pack-unit">$0.08 / token</div>
+            <button class="pack-buy-btn" onclick="buyPack('whale', this)">BUY NOW →</button>
+        </div>
+    </div>
+    <div style="text-align:center; margin-top:12px; font-family:var(--mono); font-size:0.65rem; color:var(--text3);">
+        Powered by <span style="color:var(--accent);">Stripe</span> — secure, encrypted payments. Tokens added instantly after checkout.
+    </div>
+</div>
+
+<!-- FAQ -->
+<div style="max-width:700px; margin:40px auto 0;" class="fade-up-3">
+    <div class="sec-label" style="text-align:center; margin-bottom:0;">// FAQ</div>
+    <div class="card card-pad" style="margin-top:16px;">
+        <div class="faq-item">
+            <div class="faq-q">What is a token?</div>
+            <div class="faq-a">A token is Fin-TAP's internal credit unit. Each AI prediction request consumes exactly 1 token, regardless of model type or asset class (stocks or crypto).</div>
+        </div>
+        <div class="faq-item">
+            <div class="faq-q">Do I need a credit card to sign up?</div>
+            <div class="faq-a">No. You receive 5 free tokens on registration with no payment required, giving you 5 immediate predictions to explore the platform.</div>
+        </div>
+        <div class="faq-item">
+            <div class="faq-q">Are cryptocurrency predictions available?</div>
+            <div class="faq-a">Yes! Fin-TAP now supports BTC, ETH, BNB, SOL, ADA, XRP, DOGE and AVAX — the same ML pipeline that powers stock predictions also works for crypto.</div>
+        </div>
+        <div class="faq-item">
+            <div class="faq-q">How accurate are the predictions?</div>
+            <div class="faq-a">Models are trained in real-time on 8+ years of historical data and validated on held-out test data. XGBoost and Gradient Boost typically achieve ~1% MAPE on backtesting. Always treat predictions as one signal, not financial advice.</div>
+        </div>
+        <div class="faq-item">
+            <div class="faq-q">Is the data always up to date?</div>
+            <div class="faq-a">Yes. Fin-TAP uses a smart cache: data refreshes every hour during market hours, and every 6 hours when markets are closed. No manual retraining needed — every prediction uses the latest available data.</div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function buyPack(packId, btn) {
+    const orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'PROCESSING…';
+    try {
+        const res  = await fetch('/api/payment/create-checkout-session', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ pack: packId }),
+        });
+        const data = await res.json();
+        if (data.url) {
+            window.location.href = data.url;
+        } else {
+            alert(data.error || 'Ödeme başlatılamadı. Lütfen tekrar deneyin.');
+            btn.disabled = false; btn.textContent = orig;
+        }
+    } catch (e) {
+        alert('Bağlantı hatası. Lütfen tekrar deneyin.');
+        btn.disabled = false; btn.textContent = orig;
+    }
+}
+
+async function subscribePlan(planId, btn) {
+    const orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'PROCESSING…';
+    try {
+        const res  = await fetch('/api/payment/create-subscription', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ plan: planId }),
+        });
+        const data = await res.json();
+        if (data.url) {
+            window.location.href = data.url;
+        } else {
+            alert(data.error || 'Abonelik başlatılamadı. Lütfen tekrar deneyin.');
+            btn.disabled = false; btn.textContent = orig;
+        }
+    } catch (e) {
+        alert('Bağlantı hatası. Lütfen tekrar deneyin.');
+        btn.disabled = false; btn.textContent = orig;
+    }
+}
+</script>
+{% endblock %}

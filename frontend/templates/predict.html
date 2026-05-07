@@ -1,0 +1,791 @@
+{% extends "base.html" %}
+{% block title %}AI Forecast — Fin-TAP{% endblock %}
+{% block header_title %}AI Price Forecast{% endblock %}
+{% block header_sub %}ML-POWERED 14-DAY PRICE PREDICTION ENGINE{% endblock %}
+
+{% block content %}
+<style>
+    .config-grid {
+        display: grid;
+        grid-template-columns: 320px 1fr;
+        gap: 16px;
+        align-items: start;
+    }
+
+    .feature-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 6px;
+    }
+
+    /* Result panel */
+    .result-stat {
+        display: flex; flex-direction: column;
+        padding: 16px 20px;
+        border-right: 1px solid var(--border);
+    }
+    .result-stat:last-child { border-right: none; }
+    .rs-label { font-family: var(--mono); font-size: 0.55rem; letter-spacing: 2px; color: var(--text3); margin-bottom: 6px; text-transform: uppercase; }
+    .rs-value { font-family: var(--mono); font-size: 1.3rem; font-weight: 700; }
+
+    /* Run button loading */
+    .btn-run {
+        width: 100%; padding: 12px;
+        background: var(--accent); color: #000;
+        font-family: var(--sans); font-weight: 800;
+        font-size: 0.9rem; border: none; border-radius: 7px;
+        cursor: pointer; transition: all 0.2s;
+        letter-spacing: 0.5px;
+        margin-top: 4px;
+    }
+    .btn-run:hover:not(:disabled) { background: #fff; transform: translateY(-1px); }
+    .btn-run:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    /* Model option cards */
+    .model-opt {
+        display: flex; align-items: center; gap: 10px;
+        padding: 10px 12px;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        cursor: pointer; transition: all 0.15s;
+        margin-bottom: 6px;
+    }
+    .model-opt:last-child { margin-bottom: 0; }
+    .model-opt:hover { border-color: var(--border2); }
+    .model-opt.selected { border-color: var(--accent); background: var(--accent-dim); }
+    .model-opt input { accent-color: var(--accent); }
+    .model-name { font-weight: 700; font-size: 0.83rem; }
+    .model-meta { font-family: var(--mono); font-size: 0.62rem; color: var(--text2); margin-top: 1px; }
+
+    .model-tag {
+        margin-left: auto;
+        font-family: var(--mono);
+        font-size: 0.58rem;
+        padding: 2px 8px;
+        border-radius: 3px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+    }
+    .tag-fast    { background: var(--green-dim); color: var(--green); border: 1px solid rgba(0,230,118,0.2); }
+    .tag-best    { background: var(--accent-dim); color: var(--accent); border: 1px solid rgba(0,212,255,0.2); }
+    .tag-deep    { background: var(--purple-dim); color: var(--purple); border: 1px solid rgba(124,92,252,0.2); }
+    .tag-bal     { background: var(--amber-dim); color: var(--amber); border: 1px solid rgba(255,167,38,0.2); }
+
+    .spinner {
+        display: inline-block;
+        width: 14px; height: 14px;
+        border: 2px solid rgba(0,0,0,0.3);
+        border-top-color: #000;
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Timeframe buttons */
+    .tf-btn {
+        background: var(--surface2); border: 1px solid var(--border);
+        color: var(--text2); border-radius: 6px; padding: 7px 0;
+        font-family: var(--mono); font-size: 0.72rem; font-weight: 700;
+        cursor: pointer; transition: all 0.15s; letter-spacing: 1px;
+    }
+    .tf-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .tf-btn.tf-active {
+        background: var(--accent-dim); border-color: var(--accent);
+        color: var(--accent);
+    }
+
+    /* Sentiment widget */
+    .sent-score-bar {
+        height: 6px; background: var(--surface3); border-radius: 3px;
+        overflow: hidden; margin: 10px 16px;
+    }
+    .ssb-fill { height: 100%; border-radius: 3px; transition: width 0.6s ease; }
+    .sent-article {
+        display: flex; align-items: flex-start; gap: 10px;
+        padding: 8px 16px; border-bottom: 1px solid var(--border);
+        font-size: 0.78rem;
+    }
+    .sent-article:last-child { border-bottom: none; }
+    .sent-dot {
+        width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 4px;
+    }
+    .sent-dot.positive { background: var(--green); box-shadow: 0 0 4px rgba(0,230,118,0.5); }
+    .sent-dot.negative { background: var(--red);   box-shadow: 0 0 4px rgba(255,69,96,0.5); }
+    .sent-dot.neutral  { background: var(--text3); }
+    .sent-title { flex: 1; line-height: 1.4; color: var(--text2); }
+    .sent-title a { color: var(--text2); text-decoration: none; }
+    .sent-title a:hover { color: var(--accent); }
+    .sent-time { font-family: var(--mono); font-size: 0.6rem; color: var(--text3); white-space: nowrap; }
+
+    /* ── Candlestick chart ── */
+    .ind-toggle {
+        display: inline-flex; align-items: center; gap: 5px;
+        padding: 4px 10px; border-radius: 5px;
+        border: 1px solid var(--border);
+        background: var(--surface2);
+        font-family: var(--mono); font-size: 0.6rem; font-weight: 700;
+        color: var(--text3); cursor: pointer; transition: all 0.15s;
+        letter-spacing: 0.5px;
+    }
+    .ind-toggle.on { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+    .ind-toggle .dot { width: 7px; height: 7px; border-radius: 50%; }
+    #candle-chart-wrap { position: relative; }
+    #candle-chart { width: 100%; height: 260px; }
+    #rsi-chart    { width: 100%; height: 90px; }
+    .chart-divider {
+        display: flex; align-items: center; gap: 10px;
+        padding: 4px 16px;
+        font-family: var(--mono); font-size: 0.58rem; color: var(--text3);
+        letter-spacing: 1px;
+    }
+    .chart-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+    #candle-loading {
+        position: absolute; inset: 0;
+        display: flex; align-items: center; justify-content: center;
+        background: var(--surface); border-radius: 0 0 12px 12px;
+        font-family: var(--mono); font-size: 0.68rem; color: var(--text3); gap: 8px;
+    }
+    .mini-spin {
+        width: 14px; height: 14px;
+        border: 2px solid var(--border2); border-top-color: var(--accent);
+        border-radius: 50%; animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+
+<div class="config-grid fade-up">
+
+    <!-- LEFT: Config Panel -->
+    <div style="display:flex; flex-direction:column; gap:12px;">
+
+        <!-- Stock/Crypto selector -->
+        <div class="card card-pad">
+            <div class="sec-label">// SELECT INSTRUMENT</div>
+            <label class="form-label">Stock or Crypto</label>
+            <select id="ticker-input" class="form-select">
+                <optgroup label="── STOCKS ──">
+                {% for t in trained_stocks %}
+                {% if '-USD' not in t %}
+                <option value="{{ t }}" {% if t == ticker_from_url %}selected{% endif %}>{{ t }}</option>
+                {% endif %}
+                {% endfor %}
+                </optgroup>
+                <optgroup label="── CRYPTO ──">
+                {% for t in trained_stocks %}
+                {% if '-USD' in t %}
+                <option value="{{ t }}" {% if t == ticker_from_url %}selected{% endif %}>{{ t }}</option>
+                {% endif %}
+                {% endfor %}
+                </optgroup>
+            </select>
+        </div>
+
+        <!-- Model selector -->
+        <div class="card card-pad">
+            <div class="sec-label">// CHOOSE ML MODEL</div>
+
+            <label class="model-opt selected" onclick="selectModel(this,'LINEAR')">
+                <input type="radio" name="model" value="LINEAR" checked hidden>
+                <div>
+                    <div class="model-name">Ridge Regression</div>
+                    <div class="model-meta">sklearn · ~1s</div>
+                </div>
+                <span class="model-tag tag-fast">FAST</span>
+            </label>
+
+            <label class="model-opt" onclick="selectModel(this,'RANDOM_FOREST')">
+                <input type="radio" name="model" value="RANDOM_FOREST" hidden>
+                <div>
+                    <div class="model-name">Random Forest</div>
+                    <div class="model-meta">sklearn · ~8s</div>
+                </div>
+                <span class="model-tag tag-bal">BALANCED</span>
+            </label>
+
+            <label class="model-opt" onclick="selectModel(this,'EXTRA_TREES')">
+                <input type="radio" name="model" value="EXTRA_TREES" hidden>
+                <div>
+                    <div class="model-name">Extra Trees</div>
+                    <div class="model-meta">sklearn · ~6s</div>
+                </div>
+                <span class="model-tag tag-bal">BALANCED</span>
+            </label>
+
+            <label class="model-opt" onclick="selectModel(this,'GRADIENT_BOOST')">
+                <input type="radio" name="model" value="GRADIENT_BOOST" hidden>
+                <div>
+                    <div class="model-name">Gradient Boosting</div>
+                    <div class="model-meta">sklearn · ~15s</div>
+                </div>
+                <span class="model-tag tag-best">RECOMMENDED</span>
+            </label>
+
+            <label class="model-opt" onclick="selectModel(this,'XGBOOST')">
+                <input type="radio" name="model" value="XGBOOST" hidden>
+                <div>
+                    <div class="model-name">XGBoost</div>
+                    <div class="model-meta">xgboost · ~10s</div>
+                </div>
+                <span class="model-tag tag-best">RECOMMENDED</span>
+            </label>
+
+            <label class="model-opt" onclick="selectModel(this,'LIGHTGBM')">
+                <input type="radio" name="model" value="LIGHTGBM" hidden>
+                <div>
+                    <div class="model-name">LightGBM</div>
+                    <div class="model-meta">lightgbm · ~8s</div>
+                </div>
+                <span class="model-tag tag-bal">EFFICIENT</span>
+            </label>
+
+            <label class="model-opt" onclick="selectModel(this,'LSTM')">
+                <input type="radio" name="model" value="LSTM" hidden>
+                <div>
+                    <div class="model-name">LSTM Neural Net</div>
+                    <div class="model-meta">tensorflow · ~30s</div>
+                </div>
+                <span class="model-tag tag-deep">DEEP LEARNING</span>
+            </label>
+        </div>
+
+        <!-- Timeframe selector -->
+        <div class="card card-pad">
+            <div class="sec-label">// FORECAST HORIZON</div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px;">
+                <button class="tf-btn" data-days="7"  onclick="setHorizon(this)">7D</button>
+                <button class="tf-btn tf-active" data-days="14" onclick="setHorizon(this)">14D</button>
+                <button class="tf-btn" data-days="30" onclick="setHorizon(this)">30D</button>
+                <button class="tf-btn" data-days="90" onclick="setHorizon(this)">90D</button>
+            </div>
+            <div id="horizon-note" style="margin-top:8px;font-family:var(--mono);font-size:0.6rem;color:var(--text3);line-height:1.5;">
+                14-day forecast — balanced accuracy vs horizon.
+            </div>
+        </div>
+
+        <!-- Run button -->
+        <button id="run-btn" class="btn-run" onclick="runPrediction()">
+            ▶ RUN ANALYSIS (1 TOKEN)
+        </button>
+
+        <!-- Token hint -->
+        <div style="text-align:center; font-family:var(--mono); font-size:0.65rem; color:var(--text3); margin-top:-4px;">
+            You have <span class="c-amber" id="bal-display">{{ balance }}</span> tokens remaining
+        </div>
+    </div>
+
+    <!-- RIGHT: Features + Result -->
+    <div style="display:flex; flex-direction:column; gap:12px;">
+
+        <!-- Feature checkboxes -->
+        <div class="card card-pad">
+            <div class="sec-label">// TECHNICAL INDICATORS — FEATURE SELECTION</div>
+            <p style="font-size:0.78rem; color:var(--text2); margin-bottom:8px;">
+                Select indicators. <span style="color:var(--amber);">⚠ Conflicting groups auto-deselect.</span>
+            </p>
+            <div id="conflict-warn" style="display:none; font-family:var(--mono); font-size:0.62rem; color:var(--amber); background:rgba(255,167,38,0.07); border:1px solid rgba(255,167,38,0.2); border-radius:5px; padding:6px 10px; margin-bottom:10px;"></div>
+            <div class="feature-grid" id="feature-checkboxes">
+                <!-- MOMENTUM GROUP -->
+                <label class="cb-label" data-group="momentum"><input type="checkbox" value="RSI"       checked data-conflicts=""> RSI (7, 14, 21)</label>
+                <label class="cb-label" data-group="momentum"><input type="checkbox" value="Momentum"  checked data-conflicts=""> ROC / Momentum</label>
+                <label class="cb-label" data-group="momentum"><input type="checkbox" value="Stoch"           data-conflicts="Williams"> Stochastic K/D</label>
+                <label class="cb-label" data-group="momentum"><input type="checkbox" value="Williams"         data-conflicts="Stoch"> Williams %R</label>
+                <label class="cb-label" data-group="momentum"><input type="checkbox" value="CCI"             data-conflicts=""> CCI (20)</label>
+                <!-- TREND GROUP -->
+                <label class="cb-label" data-group="trend"><input type="checkbox" value="MACD"     checked data-conflicts=""> MACD + Signal</label>
+                <label class="cb-label" data-group="trend"><input type="checkbox" value="SMA"      checked data-conflicts="EMA"> SMA Distance</label>
+                <label class="cb-label" data-group="trend"><input type="checkbox" value="EMA"            data-conflicts="SMA"> EMA Distance</label>
+                <label class="cb-label" data-group="trend"><input type="checkbox" value="ADX"            data-conflicts=""> ADX Trend Str</label>
+                <label class="cb-label" data-group="trend"><input type="checkbox" value="Trend"          data-conflicts=""> SMA Slope</label>
+                <!-- VOLATILITY GROUP -->
+                <label class="cb-label" data-group="vol"><input type="checkbox" value="Bollinger"  checked data-conflicts=""> Bollinger Bands</label>
+                <label class="cb-label" data-group="vol"><input type="checkbox" value="Volatility" checked data-conflicts=""> Volatility / RVol</label>
+                <label class="cb-label" data-group="vol"><input type="checkbox" value="ATR"              data-conflicts=""> ATR True Range</label>
+                <!-- VOLUME GROUP -->
+                <label class="cb-label" data-group="volume"><input type="checkbox" value="Volume"        data-conflicts=""> Volume Ratios</label>
+                <!-- EXTRA -->
+                <label class="cb-label" data-group="extra"><input type="checkbox" value="Pattern"        data-conflicts=""> Price Patterns</label>
+                <label class="cb-label" data-group="extra"><input type="checkbox" value="Distance"       data-conflicts=""> 52W High/Low</label>
+                <label class="cb-label" data-group="extra"><input type="checkbox" value="Returns"  checked data-conflicts=""> Log Returns</label>
+            </div>
+        </div>
+
+        <!-- Result Panel (hidden until prediction) -->
+        <div id="result-panel" class="card" style="display:none;">
+
+            <!-- Stats row -->
+            <div style="display:grid; grid-template-columns:repeat(4,1fr); border-bottom:1px solid var(--border);">
+                <div class="result-stat">
+                    <span class="rs-label" id="horizon-label">14-DAY TARGET</span>
+                    <span class="rs-value c-accent" id="res-price">—</span>
+                </div>
+                <div class="result-stat">
+                    <span class="rs-label">CURRENT PRICE</span>
+                    <span class="rs-value" id="res-current" style="color:var(--text);">—</span>
+                </div>
+                <div class="result-stat">
+                    <span class="rs-label">RETURN POTENTIAL</span>
+                    <span class="rs-value" id="res-gain">—</span>
+                </div>
+                <div class="result-stat">
+                    <span class="rs-label">MODEL USED</span>
+                    <span class="rs-value" id="res-model" style="font-size:0.85rem; color:var(--text2);">—</span>
+                </div>
+            </div>
+
+            <!-- Chart -->
+            <div style="padding:20px;">
+                <div class="sec-label" id="chart-label">// BACKTEST VALIDATION + 14-DAY FORECAST</div>
+                <div style="position:relative; height:280px;">
+                    <canvas id="predChart"></canvas>
+                </div>
+                <div style="display:flex; gap:20px; margin-top:12px; font-family:var(--mono); font-size:0.68rem; color:var(--text2);">
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <div style="width:16px; height:2px; background:var(--green); border-radius:1px;"></div> Actual Price
+                    </div>
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <div style="width:16px; height:2px; background:var(--amber); border-radius:1px; border-top: 2px dashed var(--amber); height:0;"></div> Model Prediction
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Market Chart (Candlestick + Indicators) -->
+        <div class="card" id="market-chart-card" style="overflow:hidden;">
+            <div style="padding:10px 16px 8px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+                <div>
+                    <div class="sec-label" style="margin-bottom:2px;">// MARKET CHART</div>
+                    <div style="font-weight:800; font-size:0.85rem;" id="candle-ticker-title">—</div>
+                </div>
+                <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                    <button class="ind-toggle on" id="tog-sma20" onclick="toggleIndicator('sma20')">
+                        <span class="dot" style="background:#00d4ff;"></span> SMA20
+                    </button>
+                    <button class="ind-toggle on" id="tog-sma50" onclick="toggleIndicator('sma50')">
+                        <span class="dot" style="background:#ffa726;"></span> SMA50
+                    </button>
+                    <button class="ind-toggle" id="tog-bb" onclick="toggleIndicator('bb')">
+                        <span class="dot" style="background:#7c5cfc;"></span> Bollinger
+                    </button>
+                </div>
+            </div>
+            <div id="candle-chart-wrap" style="position:relative;">
+                <div id="candle-chart"></div>
+                <div class="chart-divider">RSI (14)</div>
+                <div id="rsi-chart"></div>
+                <div id="candle-loading">
+                    <span class="mini-spin"></span> Loading chart…
+                </div>
+            </div>
+        </div>
+
+        <!-- Sentiment Widget -->
+        <div class="card" id="sentiment-card" style="overflow:hidden;">
+            <div class="card-head" style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
+                <div>
+                    <div class="sec-label" style="margin-bottom:2px;">// NEWS SENTIMENT</div>
+                    <div style="font-weight:800;font-size:0.85rem;">Market Pulse — <span id="sent-ticker">—</span></div>
+                </div>
+                <div id="sent-badge" style="font-family:var(--mono);font-size:0.62rem;font-weight:700;padding:3px 10px;border-radius:4px;letter-spacing:1px;">—</div>
+            </div>
+            <div id="sent-body">
+                <div style="text-align:center;padding:24px;color:var(--text3);font-family:var(--mono);font-size:0.7rem;">
+                    Select a ticker to load sentiment data.
+                </div>
+            </div>
+        </div>
+
+        <!-- Empty state -->
+        <div id="empty-state" class="card card-pad" style="text-align:center; padding:48px;">
+            <div style="font-size:2.5rem; margin-bottom:12px;">🤖</div>
+            <div style="font-weight:700; margin-bottom:6px; font-size:0.95rem;">Ready to Analyze</div>
+            <div style="color:var(--text2); font-size:0.82rem;">Configure your model and indicators on the left, then click Run Analysis.</div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let predChart = null;
+let selectedHorizon = 14;
+
+const horizonNotes = {
+    7:  '7-day forecast — highest accuracy, short-term signal.',
+    14: '14-day forecast — balanced accuracy vs horizon.',
+    30: '30-day forecast — medium-term trend, lower precision.',
+    90: '90-day forecast — long-term direction, use with caution.',
+};
+
+function setHorizon(btn) {
+    document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('tf-active'));
+    btn.classList.add('tf-active');
+    selectedHorizon = parseInt(btn.dataset.days);
+    document.getElementById('horizon-note').textContent = horizonNotes[selectedHorizon];
+    // Update result label if panel is already showing
+    const lbl = document.getElementById('horizon-label');
+    if (lbl) lbl.textContent = `${selectedHorizon}-DAY TARGET`;
+}
+
+function selectModel(el, val) {
+    document.querySelectorAll('.model-opt').forEach(m => m.classList.remove('selected'));
+    el.classList.add('selected');
+    el.querySelector('input').checked = true;
+}
+
+// Feature conflict detection
+document.querySelectorAll('#feature-checkboxes input[type="checkbox"]').forEach(cb => {
+    cb.addEventListener('change', () => {
+        const conflicts = cb.dataset.conflicts ? cb.dataset.conflicts.split(',').map(s=>s.trim()).filter(Boolean) : [];
+        if (cb.checked && conflicts.length) {
+            conflicts.forEach(cval => {
+                const conflicting = document.querySelector(`#feature-checkboxes input[value="${cval}"]`);
+                if (conflicting && conflicting.checked) {
+                    conflicting.checked = false;
+                    conflicting.closest('.cb-label').style.opacity = '0.5';
+                    setTimeout(() => conflicting.closest('.cb-label').style.opacity = '', 1000);
+                }
+            });
+            const warn = document.getElementById('conflict-warn');
+            warn.textContent = `⚠ Conflicting indicators auto-deselected: ${conflicts.join(', ')}`;
+            warn.style.display = 'block';
+            setTimeout(() => warn.style.display = 'none', 3000);
+        }
+    });
+});
+
+async function runPrediction() {
+    const ticker   = document.getElementById('ticker-input').value;
+    const model    = document.querySelector('input[name="model"]:checked').value;
+    const features = [...document.querySelectorAll('#feature-checkboxes input:checked')].map(c => c.value);
+    const btn      = document.getElementById('run-btn');
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Analyzing...';
+
+    try {
+        const res  = await fetch('/api/predict_run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ticker, model, features, horizon: selectedHorizon })
+        });
+
+        if (!res.ok || res.headers.get('content-type')?.includes('text/html')) {
+            throw new Error('Server error — check backend logs');
+        }
+
+        const data = await res.json();
+
+        if (data.error) { alert('⚠ ' + data.error); return; }
+
+        // Update token count (local display + topbar)
+        document.getElementById('bal-display').textContent = data.balance;
+        const topbarBalance = document.getElementById('token-balance');
+        if (topbarBalance) topbarBalance.textContent = data.balance;
+
+        // Fill stats
+        document.getElementById('res-price').textContent   = `$${data.prediction}`;
+        document.getElementById('res-model').textContent   = model;
+        document.getElementById('horizon-label').textContent = `${selectedHorizon}-DAY TARGET`;
+
+        // Hide empty state, show result
+        document.getElementById('empty-state').style.display = 'none';
+        document.getElementById('result-panel').style.display = 'block';
+        document.getElementById('chart-label').textContent =
+            `// BACKTEST VALIDATION + ${selectedHorizon}-DAY FORECAST`;
+
+        // Draw chart
+        drawChart(data.chart_data, ticker);
+
+    } catch(e) {
+        alert('Error: ' + e.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '▶ RUN ANALYSIS (1 TOKEN)';
+    }
+}
+
+/* ── Sentiment ── */
+let _lastSentTicker = null;
+
+async function loadSentiment(ticker) {
+    if (ticker === _lastSentTicker) return;
+    _lastSentTicker = ticker;
+
+    document.getElementById('sent-ticker').textContent = ticker;
+    document.getElementById('sent-badge').textContent  = '...';
+    document.getElementById('sent-badge').style.cssText = 'font-family:var(--mono);font-size:0.62rem;font-weight:700;padding:3px 10px;border-radius:4px;letter-spacing:1px;background:var(--surface2);color:var(--text3);';
+    document.getElementById('sent-body').innerHTML =
+        '<div style="text-align:center;padding:20px;color:var(--text3);font-family:var(--mono);font-size:0.7rem;">Loading news...</div>';
+
+    try {
+        const r = await fetch(`/api/sentiment/${encodeURIComponent(ticker)}`);
+        const d = await r.json();
+
+        if (d.error === 'packages_missing') {
+            document.getElementById('sent-body').innerHTML =
+                '<div style="text-align:center;padding:20px;color:var(--text3);font-family:var(--mono);font-size:0.7rem;">Sentiment packages not installed on server.</div>';
+            return;
+        }
+        if (d.error || !d.articles?.length) {
+            document.getElementById('sent-body').innerHTML =
+                '<div style="text-align:center;padding:20px;color:var(--text3);font-family:var(--mono);font-size:0.7rem;">No news data available.</div>';
+            return;
+        }
+
+        /* Badge */
+        const colors = {
+            BULLISH: { bg:'var(--green-dim)', color:'var(--green)', border:'rgba(0,230,118,0.3)' },
+            BEARISH: { bg:'var(--red-dim)',   color:'var(--red)',   border:'rgba(255,69,96,0.3)' },
+            NEUTRAL: { bg:'var(--surface2)',  color:'var(--text2)', border:'var(--border)' },
+        };
+        const c = colors[d.overall] || colors.NEUTRAL;
+        const badge = document.getElementById('sent-badge');
+        badge.textContent = (d.overall === 'BULLISH' ? '▲ ' : d.overall === 'BEARISH' ? '▼ ' : '→ ') + d.overall;
+        badge.style.cssText = `font-family:var(--mono);font-size:0.62rem;font-weight:700;padding:3px 10px;border-radius:4px;letter-spacing:1px;background:${c.bg};color:${c.color};border:1px solid ${c.border};`;
+
+        /* Score bar (map -1..+1 to 0..100%) */
+        const pct  = Math.round((d.score + 1) / 2 * 100);
+        const barColor = d.score >= 0.05 ? 'var(--green)' : d.score <= -0.05 ? 'var(--red)' : 'var(--text3)';
+        const barHtml = `
+            <div style="display:flex;justify-content:space-between;padding:8px 16px 0;font-family:var(--mono);font-size:0.6rem;color:var(--text3);">
+                <span>BEARISH</span>
+                <span>Score: ${d.score > 0 ? '+' : ''}${d.score.toFixed(3)}</span>
+                <span>BULLISH</span>
+            </div>
+            <div class="sent-score-bar">
+                <div class="ssb-fill" style="width:${pct}%;background:${barColor};margin-left:0;"></div>
+            </div>`;
+
+        /* Articles */
+        const artHtml = d.articles.map(a => {
+            const t = a.published ? a.published.replace('T',' ').substring(0,16) : '';
+            const link = a.link ? `<a href="${a.link}" target="_blank" rel="noopener">${a.title}</a>` : a.title;
+            return `<div class="sent-article">
+                <div class="sent-dot ${a.sentiment}"></div>
+                <div class="sent-title">${link}</div>
+                <div class="sent-time">${t}</div>
+            </div>`;
+        }).join('');
+
+        document.getElementById('sent-body').innerHTML = barHtml + artHtml;
+
+    } catch(e) {
+        document.getElementById('sent-body').innerHTML =
+            '<div style="text-align:center;padding:20px;color:var(--text3);font-family:var(--mono);font-size:0.7rem;">Failed to load sentiment.</div>';
+    }
+}
+
+/* Ticker değişince sentiment + chart yenile */
+document.getElementById('ticker-input').addEventListener('change', e => {
+    loadSentiment(e.target.value);
+    loadCandleChart(e.target.value);
+});
+/* İlk yüklemede */
+loadSentiment(document.getElementById('ticker-input').value);
+loadCandleChart(document.getElementById('ticker-input').value);
+
+/* ── Candlestick + Indicator Chart ── */
+let _candleChart = null, _rsiChart = null;
+let _series = {};   // keyed by indicator name
+let _indState = { sma20: true, sma50: true, bb: false };
+let _lastCandleTicker = null;
+let _ohlcData = null;
+
+const CHART_COLORS = {
+    sma20: '#00d4ff',
+    sma50: '#ffa726',
+    bb:    '#7c5cfc',
+};
+
+function _destroyCharts() {
+    if (_candleChart) { _candleChart.remove(); _candleChart = null; }
+    if (_rsiChart)    { _rsiChart.remove();    _rsiChart = null; }
+    _series = {};
+}
+
+function _buildCharts(data) {
+    _destroyCharts();
+    _ohlcData = data;
+
+    const chartOpts = {
+        layout:     { background: { color: '#0f1318' }, textColor: '#4a5568' },
+        grid:       { vertLines: { color: '#1e2530' }, horzLines: { color: '#1e2530' } },
+        crosshair:  { mode: 1 },
+        rightPriceScale: { borderColor: '#1e2530' },
+        timeScale:  { borderColor: '#1e2530', timeVisible: true, secondsVisible: false },
+        handleScroll: true, handleScale: true,
+    };
+
+    /* Main chart */
+    _candleChart = LightweightCharts.createChart(document.getElementById('candle-chart'), {
+        ...chartOpts, height: 260,
+    });
+
+    const candleSeries = _candleChart.addCandlestickSeries({
+        upColor:        '#00e676', downColor: '#ff4560',
+        borderUpColor:  '#00e676', borderDownColor: '#ff4560',
+        wickUpColor:    '#00e676', wickDownColor: '#ff4560',
+    });
+    candleSeries.setData(data.candles);
+    _series.candle = candleSeries;
+
+    /* Volume (histogram) */
+    const volSeries = _candleChart.addHistogramSeries({
+        priceFormat:   { type: 'volume' },
+        priceScaleId:  'vol',
+        scaleMargins:  { top: 0.85, bottom: 0 },
+    });
+    volSeries.setData(data.volume);
+    _series.volume = volSeries;
+
+    /* SMA20 */
+    _series.sma20 = _candleChart.addLineSeries({ color: CHART_COLORS.sma20, lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+    _series.sma20.setData(data.sma20);
+    _series.sma20.applyOptions({ visible: _indState.sma20 });
+
+    /* SMA50 */
+    _series.sma50 = _candleChart.addLineSeries({ color: CHART_COLORS.sma50, lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+    _series.sma50.setData(data.sma50);
+    _series.sma50.applyOptions({ visible: _indState.sma50 });
+
+    /* Bollinger Bands */
+    _series.bb_upper = _candleChart.addLineSeries({ color: CHART_COLORS.bb, lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
+    _series.bb_upper.setData(data.bb_upper);
+    _series.bb_upper.applyOptions({ visible: _indState.bb });
+
+    _series.bb_lower = _candleChart.addLineSeries({ color: CHART_COLORS.bb, lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
+    _series.bb_lower.setData(data.bb_lower);
+    _series.bb_lower.applyOptions({ visible: _indState.bb });
+
+    _series.bb_mid = _candleChart.addLineSeries({ color: `${CHART_COLORS.bb}80`, lineWidth: 1, lineStyle: 1, priceLineVisible: false, lastValueVisible: false });
+    _series.bb_mid.setData(data.bb_mid);
+    _series.bb_mid.applyOptions({ visible: _indState.bb });
+
+    /* RSI chart */
+    _rsiChart = LightweightCharts.createChart(document.getElementById('rsi-chart'), {
+        ...chartOpts, height: 90,
+        rightPriceScale: { ...chartOpts.rightPriceScale, scaleMargins: { top: 0.1, bottom: 0.1 } },
+    });
+
+    const rsiSeries = _rsiChart.addLineSeries({ color: '#b47cff', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: true });
+    rsiSeries.setData(data.rsi);
+    _series.rsi = rsiSeries;
+
+    /* Overbought / oversold reference lines */
+    rsiSeries.createPriceLine({ price: 70, color: 'rgba(255,69,96,0.4)',   lineWidth: 1, lineStyle: 1, axisLabelVisible: false });
+    rsiSeries.createPriceLine({ price: 30, color: 'rgba(0,230,118,0.4)',   lineWidth: 1, lineStyle: 1, axisLabelVisible: false });
+    rsiSeries.createPriceLine({ price: 50, color: 'rgba(136,150,171,0.2)', lineWidth: 1, lineStyle: 2, axisLabelVisible: false });
+
+    /* Sync time range */
+    _candleChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+        if (range) _rsiChart.timeScale().setVisibleLogicalRange(range);
+    });
+    _rsiChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+        if (range) _candleChart.timeScale().setVisibleLogicalRange(range);
+    });
+
+    _candleChart.timeScale().fitContent();
+    _rsiChart.timeScale().fitContent();
+}
+
+function toggleIndicator(name) {
+    _indState[name] = !_indState[name];
+    const btn = document.getElementById(`tog-${name}`);
+    btn.classList.toggle('on', _indState[name]);
+
+    if (!_series[name] && name !== 'bb') return;
+    if (name === 'bb') {
+        ['bb_upper', 'bb_lower', 'bb_mid'].forEach(k => {
+            if (_series[k]) _series[k].applyOptions({ visible: _indState.bb });
+        });
+    } else {
+        if (_series[name]) _series[name].applyOptions({ visible: _indState[name] });
+    }
+}
+
+async function loadCandleChart(ticker) {
+    if (ticker === _lastCandleTicker) return;
+    _lastCandleTicker = ticker;
+    document.getElementById('candle-ticker-title').textContent = ticker;
+    document.getElementById('candle-loading').style.display = 'flex';
+
+    try {
+        const r = await fetch(`/api/ohlc/${encodeURIComponent(ticker)}`);
+        const d = await r.json();
+        if (d.error) throw new Error(d.error);
+        _buildCharts(d);
+    } catch(e) {
+        document.getElementById('candle-loading').innerHTML =
+            `<span style="color:var(--text3);font-family:var(--mono);font-size:0.68rem;">Chart unavailable</span>`;
+        return;
+    }
+    document.getElementById('candle-loading').style.display = 'none';
+}
+
+function drawChart(cd, ticker) {
+    if (predChart) predChart.destroy();
+    const ctx = document.getElementById('predChart').getContext('2d');
+
+    // Compute stats from chart data
+    const actualFiltered = cd.actual_prices.filter(v => v !== null);
+    if (actualFiltered.length) {
+        const last = actualFiltered[actualFiltered.length - 1];
+        const predFiltered = cd.predicted_prices.filter(v => v !== null);
+        const finalPred = predFiltered[predFiltered.length - 1];
+        const gain = ((finalPred - last) / last * 100).toFixed(2);
+
+        document.getElementById('res-current').textContent = `$${last.toFixed(2)}`;
+        const gainEl = document.getElementById('res-gain');
+        gainEl.textContent = `${gain > 0 ? '+' : ''}${gain}%`;
+        gainEl.style.color = gain >= 0 ? 'var(--green)' : 'var(--red)';
+    }
+
+    predChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: cd.dates,
+            datasets: [
+                {
+                    label: 'Actual Price',
+                    data: cd.actual_prices,
+                    borderColor: '#00e676',
+                    backgroundColor: 'rgba(0,230,118,0.05)',
+                    borderWidth: 1.5,
+                    pointRadius: 0, pointHoverRadius: 3,
+                    fill: true, tension: 0.3
+                },
+                {
+                    label: 'Model Prediction',
+                    data: cd.predicted_prices,
+                    borderColor: '#ffa726',
+                    borderDash: [5, 4],
+                    borderWidth: 1.5,
+                    pointRadius: 0, pointHoverRadius: 3,
+                    fill: false, tension: 0.3
+                }
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: '#0f1318',
+                    borderColor: '#1e2530', borderWidth: 1,
+                    titleColor: '#8896ab', bodyColor: '#dde3ee',
+                    titleFont: { family: 'Space Mono', size: 10 },
+                    bodyFont:  { family: 'Space Mono', size: 11 },
+                    callbacks: { label: c => ` ${c.dataset.label}: $${c.raw?.toFixed(2) ?? '—'}` }
+                }
+            },
+            scales: {
+                x: { ticks: { color:'#4a5568', maxTicksLimit:8, font:{family:'Space Mono',size:9} }, grid:{display:false}, border:{display:false} },
+                y: { ticks: { color:'#4a5568', font:{family:'Space Mono',size:9}, callback: v => '$'+v.toFixed(0) }, grid:{color:'rgba(255,255,255,0.03)'}, border:{display:false} }
+            }
+        }
+    });
+}
+</script>
+{% endblock %}

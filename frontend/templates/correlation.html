@@ -1,0 +1,441 @@
+{% extends "base.html" %}
+{% block title %}Correlation Matrix — Fin-TAP{% endblock %}
+{% block header_title %}Correlation Matrix{% endblock %}
+{% block header_sub %}PEARSON LOG-RETURN CORRELATION BETWEEN ASSETS{% endblock %}
+
+{% block content %}
+<style>
+    /* ── Controls ── */
+    .ctrl-bar {
+        display: flex; align-items: flex-end; gap: 12px;
+        flex-wrap: wrap; margin-bottom: 20px;
+    }
+    .ctrl-group { display: flex; flex-direction: column; gap: 5px; }
+    .ctrl-label { font-size: 0.7rem; font-weight: 700; color: var(--text2); letter-spacing: 0.3px; }
+
+    .period-pills { display: flex; gap: 4px; }
+    .period-pill {
+        padding: 7px 14px; border-radius: 6px;
+        border: 1px solid var(--border); background: var(--surface2);
+        font-family: var(--mono); font-size: 0.68rem; font-weight: 700;
+        color: var(--text3); cursor: pointer; transition: all 0.15s; letter-spacing: 0.5px;
+    }
+    .period-pill:hover { border-color: var(--accent); color: var(--accent); }
+    .period-pill.active { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
+
+    .btn-run {
+        background: var(--accent); color: #000;
+        border: none; border-radius: 7px; padding: 9px 20px;
+        font-family: var(--sans); font-weight: 800; font-size: 0.85rem;
+        cursor: pointer; transition: all 0.2s; letter-spacing: 0.5px;
+        white-space: nowrap;
+    }
+    .btn-run:hover:not(:disabled) { background: #fff; }
+    .btn-run:disabled { opacity: 0.5; cursor: default; }
+
+    /* ── Ticker multi-select ── */
+    .ticker-grid {
+        display: flex; flex-wrap: wrap; gap: 6px;
+        max-width: 780px;
+    }
+    .ticker-chip {
+        padding: 5px 11px; border-radius: 6px;
+        border: 1px solid var(--border); background: var(--surface2);
+        font-family: var(--mono); font-size: 0.68rem; font-weight: 700;
+        color: var(--text3); cursor: pointer; transition: all 0.15s;
+        user-select: none;
+    }
+    .ticker-chip:hover { border-color: var(--border2); color: var(--text); }
+    .ticker-chip.sel {
+        border-color: var(--accent); background: var(--accent-dim);
+        color: var(--accent);
+    }
+    .ticker-chip.sel-crypto {
+        border-color: var(--purple); background: var(--purple-dim);
+        color: var(--purple);
+    }
+    .select-all-btn {
+        padding: 5px 11px; border-radius: 6px;
+        border: 1px dashed var(--border2); background: transparent;
+        font-family: var(--mono); font-size: 0.65rem; color: var(--text3);
+        cursor: pointer; transition: all 0.15s;
+    }
+    .select-all-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* ── Heatmap ── */
+    .heatmap-wrap {
+        overflow-x: auto; overflow-y: auto;
+        max-height: 70vh;
+    }
+    .heatmap-table {
+        border-collapse: collapse;
+        font-family: var(--mono); font-size: 0.68rem;
+        white-space: nowrap;
+    }
+    .heatmap-table th {
+        padding: 6px 4px; text-align: center;
+        color: var(--text3); font-weight: 700;
+        position: sticky; top: 0; background: var(--surface); z-index: 2;
+        border-bottom: 1px solid var(--border);
+        letter-spacing: 0.5px;
+    }
+    .heatmap-table th:first-child {
+        left: 0; z-index: 3; text-align: left; padding-left: 12px;
+        min-width: 80px; border-right: 1px solid var(--border);
+    }
+    .heatmap-table td {
+        padding: 0; text-align: center; position: relative;
+        border: 1px solid rgba(30,37,48,0.4);
+    }
+    .heatmap-table td:first-child {
+        position: sticky; left: 0; z-index: 1;
+        background: var(--surface); color: var(--text2); font-weight: 700;
+        padding: 0 10px; border-right: 1px solid var(--border);
+        text-align: left;
+    }
+    .cell {
+        display: flex; align-items: center; justify-content: center;
+        width: 64px; height: 40px; font-size: 0.65rem; font-weight: 700;
+        transition: opacity 0.15s; cursor: default;
+    }
+    .cell:hover { opacity: 0.85; }
+    .cell.diag { font-size: 0.7rem; }
+
+    /* ── Summary cards ── */
+    .summary-grid {
+        display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+        margin-top: 20px;
+    }
+    @media (max-width: 700px) { .summary-grid { grid-template-columns: 1fr; } }
+
+    .pair-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+    .pair-row {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 8px 12px; background: var(--surface2);
+        border: 1px solid var(--border); border-radius: 7px;
+        font-size: 0.8rem;
+    }
+    .pair-syms { font-family: var(--mono); font-weight: 700; }
+    .pair-r {
+        font-family: var(--mono); font-weight: 700; font-size: 0.85rem;
+    }
+    .pair-bar {
+        height: 4px; border-radius: 2px; margin-top: 4px;
+        transition: width 0.4s ease;
+    }
+
+    /* ── Legend ── */
+    .legend-bar {
+        display: flex; align-items: center; gap: 0; height: 12px;
+        border-radius: 4px; overflow: hidden; width: 200px;
+        margin: 0 auto;
+    }
+    .legend-bar div { flex: 1; height: 100%; }
+
+    /* ── Loading / empty ── */
+    .loading-overlay {
+        display: none; flex-direction: column;
+        align-items: center; justify-content: center;
+        padding: 60px; gap: 12px;
+        color: var(--text3); font-family: var(--mono); font-size: 0.72rem;
+    }
+    .spinner {
+        width: 24px; height: 24px;
+        border: 2px solid var(--border2); border-top-color: var(--accent);
+        border-radius: 50%; animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .error-box {
+        background: rgba(255,69,96,0.08); border: 1px solid rgba(255,69,96,0.25);
+        border-radius: 8px; padding: 12px 16px; font-size: 0.82rem;
+        color: #ff8fa3; display: none; margin-top: 16px;
+    }
+</style>
+
+<div class="fade-up">
+
+    <!-- Controls -->
+    <div class="card card-pad" style="margin-bottom:16px;">
+        <div class="sec-label">// SELECT ASSETS</div>
+        <div class="ticker-grid" id="ticker-grid">
+            {% for t in trained_stocks %}
+            <button class="ticker-chip {% if '-USD' in t %}sel-crypto{% else %}sel{% endif %}"
+                    data-ticker="{{ t }}" data-crypto="{{ '-USD' in t|lower }}"
+                    onclick="toggleTicker(this)">{{ t }}</button>
+            {% endfor %}
+        </div>
+        <div style="margin-top:10px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <button class="select-all-btn" onclick="selectAll()">SELECT ALL</button>
+            <button class="select-all-btn" onclick="selectNone()">CLEAR</button>
+            <span style="font-family:var(--mono); font-size:0.62rem; color:var(--text3);" id="sel-count">
+                {{ trained_stocks|length }} selected
+            </span>
+        </div>
+    </div>
+
+    <div class="ctrl-bar">
+        <div class="ctrl-group">
+            <span class="ctrl-label">Lookback Period</span>
+            <div class="period-pills">
+                <button class="period-pill" data-days="30" onclick="setPeriod(this)">30D</button>
+                <button class="period-pill active" data-days="90" onclick="setPeriod(this)">90D</button>
+                <button class="period-pill" data-days="180" onclick="setPeriod(this)">180D</button>
+                <button class="period-pill" data-days="365" onclick="setPeriod(this)">1Y</button>
+            </div>
+        </div>
+        <button class="btn-run" id="run-btn" onclick="runCorrelation()">COMPUTE →</button>
+    </div>
+
+    <div class="error-box" id="corr-error"></div>
+
+    <!-- Results -->
+    <div id="results" style="display:none;">
+
+        <!-- Heatmap card -->
+        <div class="card" style="overflow:hidden; margin-bottom:16px;">
+            <div style="padding:12px 16px; border-bottom:1px solid var(--border);
+                        display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+                <div>
+                    <div class="sec-label" style="margin-bottom:2px;">// CORRELATION HEATMAP</div>
+                    <div style="font-size:0.78rem; color:var(--text2);" id="heatmap-subtitle">—</div>
+                </div>
+                <!-- Legend -->
+                <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
+                    <div class="legend-bar" id="legend-bar"></div>
+                    <div style="display:flex; justify-content:space-between; width:200px;
+                                font-family:var(--mono); font-size:0.58rem; color:var(--text3);">
+                        <span>-1.0</span><span>0.0</span><span>+1.0</span>
+                    </div>
+                </div>
+            </div>
+            <div class="heatmap-wrap" id="heatmap-wrap">
+                <div class="loading-overlay" id="loading" style="display:flex;">
+                    <div class="spinner"></div><div>Computing correlations…</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Summary: top pairs -->
+        <div class="summary-grid">
+            <div class="card card-pad">
+                <div class="sec-label">// STRONGEST POSITIVE CORRELATION</div>
+                <div class="pair-list" id="top-pos"></div>
+            </div>
+            <div class="card card-pad">
+                <div class="sec-label">// STRONGEST NEGATIVE CORRELATION</div>
+                <div class="pair-list" id="top-neg"></div>
+            </div>
+        </div>
+
+    </div>
+
+    <div class="loading-overlay" id="main-loading">
+        <div class="spinner"></div><div>Loading…</div>
+    </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let _selectedDays = 90;
+
+/* ── Ticker selection ── */
+function toggleTicker(btn) {
+    const isCrypto = btn.dataset.crypto === 'true' || btn.dataset.ticker.includes('-USD');
+    btn.classList.toggle(isCrypto ? 'sel-crypto' : 'sel');
+    updateSelCount();
+}
+function selectAll() {
+    document.querySelectorAll('.ticker-chip').forEach(b => {
+        const isCrypto = b.dataset.ticker.includes('-USD');
+        b.classList.add(isCrypto ? 'sel-crypto' : 'sel');
+    });
+    updateSelCount();
+}
+function selectNone() {
+    document.querySelectorAll('.ticker-chip').forEach(b => {
+        b.classList.remove('sel', 'sel-crypto');
+    });
+    updateSelCount();
+}
+function updateSelCount() {
+    const n = document.querySelectorAll('.ticker-chip.sel, .ticker-chip.sel-crypto').length;
+    document.getElementById('sel-count').textContent = `${n} selected`;
+}
+function getSelected() {
+    return [...document.querySelectorAll('.ticker-chip.sel, .ticker-chip.sel-crypto')]
+        .map(b => b.dataset.ticker);
+}
+
+function setPeriod(btn) {
+    document.querySelectorAll('.period-pill').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    _selectedDays = parseInt(btn.dataset.days);
+}
+
+/* ── Color scale: -1 (red) → 0 (dark) → +1 (green) ── */
+function corrColor(r) {
+    if (r === 1) return '#00e676';
+    if (r >= 0) {
+        const t = r;
+        const g = Math.round(230 * t);
+        const b = Math.round(118 * t);
+        return `rgba(0,${g},${b},${0.15 + 0.75 * t})`;
+    } else {
+        const t = -r;
+        const rv = Math.round(255 * t);
+        const gv = Math.round(69  * t);
+        return `rgba(${rv},${gv},96,${0.15 + 0.75 * t})`;
+    }
+}
+function corrTextColor(r) {
+    const abs = Math.abs(r);
+    if (abs > 0.5) return '#ffffff';
+    if (abs > 0.25) return '#dde3ee';
+    return '#8896ab';
+}
+
+/* ── Build legend ── */
+function buildLegend() {
+    const bar = document.getElementById('legend-bar');
+    const steps = 20;
+    bar.innerHTML = '';
+    for (let i = 0; i < steps; i++) {
+        const r = -1 + (2 * i / (steps - 1));
+        const d = document.createElement('div');
+        d.style.background = corrColor(r);
+        bar.appendChild(d);
+    }
+}
+
+async function runCorrelation() {
+    const tickers = getSelected();
+    if (tickers.length < 2) {
+        const e = document.getElementById('corr-error');
+        e.textContent = '⚠ Select at least 2 assets to compute correlation.';
+        e.style.display = 'block';
+        return;
+    }
+    document.getElementById('corr-error').style.display = 'none';
+
+    const btn = document.getElementById('run-btn');
+    btn.disabled = true; btn.textContent = 'Computing…';
+
+    document.getElementById('results').style.display = 'block';
+    document.getElementById('heatmap-wrap').innerHTML =
+        '<div class="loading-overlay" style="display:flex;"><div class="spinner"></div><div>Computing correlations…</div></div>';
+    document.getElementById('top-pos').innerHTML = '<div style="color:var(--text3);font-size:0.75rem;">Loading…</div>';
+    document.getElementById('top-neg').innerHTML = '<div style="color:var(--text3);font-size:0.75rem;">Loading…</div>';
+
+    try {
+        const url = `/api/correlation?tickers=${encodeURIComponent(tickers.join(','))}&days=${_selectedDays}`;
+        const r   = await fetch(url);
+        const d   = await r.json();
+
+        if (!r.ok || d.error) {
+            document.getElementById('corr-error').textContent = '⚠ ' + (d.error || 'Failed to compute.');
+            document.getElementById('corr-error').style.display = 'block';
+            document.getElementById('results').style.display = 'none';
+            return;
+        }
+
+        renderHeatmap(d);
+        renderPairs(d);
+    } catch(e) {
+        document.getElementById('corr-error').textContent = '⚠ Network error.';
+        document.getElementById('corr-error').style.display = 'block';
+    } finally {
+        btn.disabled = false; btn.textContent = 'COMPUTE →';
+    }
+}
+
+function renderHeatmap(d) {
+    const { tickers, matrix, days } = d;
+    document.getElementById('heatmap-subtitle').textContent =
+        `${tickers.length} assets · ${days} trading days of log-return data`;
+
+    buildLegend();
+
+    const wrap = document.getElementById('heatmap-wrap');
+    wrap.innerHTML = '';
+
+    const table = document.createElement('table');
+    table.className = 'heatmap-table';
+
+    // Header row
+    const thead = document.createElement('thead');
+    const hrow  = document.createElement('tr');
+    const corner = document.createElement('th');
+    corner.textContent = '';
+    hrow.appendChild(corner);
+    tickers.forEach(t => {
+        const th = document.createElement('th');
+        th.textContent = t.replace('-USD','');
+        hrow.appendChild(th);
+    });
+    thead.appendChild(hrow);
+    table.appendChild(thead);
+
+    // Body
+    const tbody = document.createElement('tbody');
+    tickers.forEach((rowTicker, i) => {
+        const tr = document.createElement('tr');
+
+        // Row label
+        const tdLabel = document.createElement('td');
+        tdLabel.textContent = rowTicker.replace('-USD','');
+        tr.appendChild(tdLabel);
+
+        tickers.forEach((colTicker, j) => {
+            const td   = document.createElement('td');
+            const val  = matrix[i][j];
+            const cell = document.createElement('div');
+            cell.className = 'cell' + (i === j ? ' diag' : '');
+            cell.textContent = val.toFixed(2);
+            cell.style.background = corrColor(val);
+            cell.style.color = corrTextColor(val);
+            cell.title = `${rowTicker} × ${colTicker}: ${val.toFixed(4)}`;
+            td.appendChild(cell);
+            tr.appendChild(td);
+        });
+
+        tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+}
+
+function renderPairs(d) {
+    function pairHtml(pair, isPos) {
+        const abs = Math.abs(pair.r);
+        const barW = Math.round(abs * 100);
+        const barColor = isPos ? 'var(--green)' : 'var(--red)';
+        const rStr = (pair.r >= 0 ? '+' : '') + pair.r.toFixed(3);
+        const rColor = isPos ? 'var(--green)' : 'var(--red)';
+        return `<div class="pair-row">
+            <div>
+                <div class="pair-syms">${pair.a.replace('-USD','')} × ${pair.b.replace('-USD','')}</div>
+                <div class="pair-bar" style="width:${barW}%;background:${barColor};opacity:0.6;"></div>
+            </div>
+            <div class="pair-r" style="color:${rColor};">${rStr}</div>
+        </div>`;
+    }
+
+    document.getElementById('top-pos').innerHTML =
+        (d.top_pos.length ? d.top_pos.map(p => pairHtml(p, true)).join('') :
+        '<div style="color:var(--text3);font-size:0.75rem;">No data</div>');
+
+    document.getElementById('top-neg').innerHTML =
+        (d.top_neg.length ? d.top_neg.map(p => pairHtml(p, false)).join('') :
+        '<div style="color:var(--text3);font-size:0.75rem;">No data</div>');
+}
+
+/* Auto-run on load with all tickers */
+window.addEventListener('DOMContentLoaded', () => {
+    updateSelCount();
+    runCorrelation();
+});
+</script>
+{% endblock %}

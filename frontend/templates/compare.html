@@ -1,0 +1,298 @@
+{% extends "base.html" %}
+{% block title %}Compare Stocks — Fin-TAP{% endblock %}
+{% block header_title %}Asset Comparison Tool{% endblock %}
+{% block header_sub %}AI-POWERED SIDE-BY-SIDE ANALYSIS · STOCKS & CRYPTO{% endblock %}
+
+{% block content %}
+<style>
+    .vs-grid {
+        display: grid;
+        grid-template-columns: 1fr 60px 1fr;
+        gap: 0;
+        align-items: end;
+        margin-bottom: 20px;
+    }
+    .vs-center {
+        display: flex; align-items: center; justify-content: center;
+        font-family: var(--mono); font-weight: 700; font-size: 0.75rem;
+        color: var(--text2); letter-spacing: 2px;
+        padding-bottom: 2px;
+    }
+
+    .compare-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    .compare-table td, .compare-table th {
+        padding: 0;
+    }
+    .ct-row {
+        display: grid;
+        grid-template-columns: 1fr 160px 1fr;
+        border-bottom: 1px solid var(--border);
+    }
+    .ct-row:last-child { border-bottom: none; }
+    .ct-cell {
+        padding: 14px 20px;
+        display: flex; align-items: center;
+        font-family: var(--mono); font-size: 0.85rem; font-weight: 700;
+    }
+    .ct-cell.right { justify-content: flex-end; }
+    .ct-label {
+        background: var(--surface2);
+        display: flex; align-items: center; justify-content: center;
+        text-align: center;
+        font-family: var(--mono);
+        font-size: 0.6rem;
+        color: var(--text3);
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        border-left: 1px solid var(--border);
+        border-right: 1px solid var(--border);
+        padding: 14px 10px;
+    }
+
+    .winner-bar {
+        height: 3px;
+        border-radius: 0 0 10px 10px;
+        background: linear-gradient(90deg, var(--accent), var(--purple));
+        margin-top: -1px;
+    }
+
+    .ct-header-row {
+        display: grid;
+        grid-template-columns: 1fr 160px 1fr;
+        background: var(--surface2);
+        border-bottom: 1px solid var(--border2);
+        border-radius: 10px 10px 0 0;
+    }
+    .ct-header-cell {
+        padding: 16px 20px;
+        font-size: 1rem; font-weight: 800;
+    }
+    .ct-header-cell.right { text-align: right; }
+    .ct-header-mid {
+        background: var(--surface3);
+        display: flex; align-items: center; justify-content: center;
+        font-family: var(--mono); font-weight: 700; font-size: 0.72rem;
+        color: var(--text3); letter-spacing: 2px;
+        border-left: 1px solid var(--border);
+        border-right: 1px solid var(--border);
+    }
+
+    .winner-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 20px 28px;
+        display: flex; align-items: center; justify-content: space-between;
+        margin-top: 16px;
+    }
+    .wc-label { font-family: var(--mono); font-size: 0.6rem; color: var(--text3); letter-spacing: 2px; margin-bottom: 6px; }
+    .wc-value { font-size: 1rem; font-weight: 800; }
+
+    .spinner {
+        display: inline-block; width: 13px; height: 13px;
+        border: 2px solid rgba(0,0,0,0.3); border-top-color: #000;
+        border-radius: 50%; animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .compare-btn {
+        background: linear-gradient(135deg, var(--accent), var(--purple));
+        color: #000; font-weight: 800;
+        font-size: 0.88rem; border: none;
+        border-radius: 7px; padding: 12px 28px;
+        cursor: pointer; transition: all 0.2s;
+        letter-spacing: 0.5px;
+        font-family: var(--sans);
+    }
+    .compare-btn:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
+    .compare-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+</style>
+
+<!-- Config Row -->
+<div class="card card-pad fade-up" style="margin-bottom:16px;">
+    <div class="sec-label">// SELECT INSTRUMENTS TO COMPARE</div>
+
+    <div class="vs-grid">
+        <div>
+            <label class="form-label" style="color:var(--accent);">Asset #1</label>
+            <select id="t1" class="form-select" style="border-color: rgba(0,212,255,0.3);">
+                <optgroup label="── STOCKS ──">
+                {% for s in stocks %}{% if '-USD' not in s %}<option value="{{ s }}">{{ s }}</option>{% endif %}{% endfor %}
+                </optgroup>
+                <optgroup label="── CRYPTO ──">
+                {% for s in stocks %}{% if '-USD' in s %}<option value="{{ s }}">{{ s }}</option>{% endif %}{% endfor %}
+                </optgroup>
+            </select>
+        </div>
+        <div class="vs-center">VS</div>
+        <div>
+            <label class="form-label" style="color:var(--purple);">Asset #2</label>
+            <select id="t2" class="form-select" style="border-color: rgba(124,92,252,0.3);">
+                <optgroup label="── STOCKS ──">
+                {% for s in stocks %}{% if '-USD' not in s %}<option value="{{ s }}" {% if loop.index == 2 %}selected{% endif %}>{{ s }}</option>{% endif %}{% endfor %}
+                </optgroup>
+                <optgroup label="── CRYPTO ──">
+                {% for s in stocks %}{% if '-USD' in s %}<option value="{{ s }}">{{ s }}</option>{% endif %}{% endfor %}
+                </optgroup>
+            </select>
+        </div>
+    </div>
+
+    <div style="margin-top:16px; display:flex; align-items:center; gap:12px;">
+        <button id="compare-btn" class="compare-btn" onclick="doCompare()">
+            ▶ RUN COMPARISON (1 TOKEN)
+        </button>
+        <span style="font-family:var(--mono); font-size:0.65rem; color:var(--text3);">
+            Uses AI model to compute return potential for both assets simultaneously
+        </span>
+    </div>
+</div>
+
+<!-- Result (hidden) -->
+<div id="result-area" style="display:none;" class="fade-up-2">
+    <div class="card" style="overflow:hidden;">
+
+        <!-- Header row -->
+        <div class="ct-header-row">
+            <div class="ct-header-cell"><span id="h-t1" class="c-accent">—</span></div>
+            <div class="ct-header-mid">METRIC</div>
+            <div class="ct-header-cell right"><span id="h-t2" class="c-purple">—</span></div>
+        </div>
+
+        <!-- Data rows -->
+        <div id="ct-body"></div>
+    </div>
+
+    <!-- Winner banner -->
+    <div class="winner-card">
+        <div>
+            <div class="wc-label">AI RECOMMENDATION</div>
+            <div class="wc-value" id="winner-text">—</div>
+        </div>
+        <div id="winner-badge"></div>
+    </div>
+</div>
+
+<!-- Empty state -->
+<div id="empty-state" class="card card-pad" style="text-align:center; padding:60px; margin-top:0;">
+    <div style="font-size:2.5rem; margin-bottom:12px;">⚖️</div>
+    <div style="font-weight:700; margin-bottom:6px;">Select Two Stocks to Compare</div>
+    <div style="color:var(--text2); font-size:0.82rem;">The AI will generate predictions for both assets and rank them by return potential.</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function doCompare() {
+    const t1  = document.getElementById('t1').value;
+    const t2  = document.getElementById('t2').value;
+    const btn = document.getElementById('compare-btn');
+
+    if (t1 === t2) { alert('Please select two different stocks.'); return; }
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Analyzing...';
+
+    try {
+        const res  = await fetch(`/api/compare_stocks?ticker1=${t1}&ticker2=${t2}`);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+
+        // Update topbar token balance
+        if (data.balance !== undefined) {
+            const tb = document.getElementById('token-balance');
+            if (tb) tb.textContent = data.balance;
+        }
+
+        const d1 = data[t1], d2 = data[t2];
+
+        document.getElementById('h-t1').textContent = t1;
+        document.getElementById('h-t2').textContent = t2;
+
+        function colorGain(v) {
+            return v > 0 ? 'var(--green)' : v < 0 ? 'var(--red)' : 'var(--text)';
+        }
+
+        function rsiColor(v) {
+            if (v > 70) return 'var(--red)';
+            if (v < 30) return 'var(--green)';
+            return 'var(--text)';
+        }
+
+        function winner(a, b) {
+            if (a > b) return '◀ BETTER';
+            if (b > a) return 'BETTER ▶';
+            return '— EQUAL —';
+        }
+
+        const rows = [
+            {
+                label: 'CURRENT PRICE',
+                v1: `$${d1.price}`, c1: 'var(--text)',
+                v2: `$${d2.price}`, c2: 'var(--text)',
+            },
+            {
+                label: 'AI TARGET (14D)',
+                v1: `$${d1.predicted}`, c1: 'var(--accent)',
+                v2: `$${d2.predicted}`, c2: 'var(--accent)',
+            },
+            {
+                label: 'RETURN POTENTIAL',
+                v1: `${d1.gain > 0 ? '+' : ''}${d1.gain}%`, c1: colorGain(d1.gain),
+                v2: `${d2.gain > 0 ? '+' : ''}${d2.gain}%`, c2: colorGain(d2.gain),
+                highlight: d1.gain > d2.gain ? 'left' : d2.gain > d1.gain ? 'right' : 'none'
+            },
+            {
+                label: 'RSI (14)',
+                v1: d1.rsi, c1: rsiColor(d1.rsi),
+                v2: d2.rsi, c2: rsiColor(d2.rsi),
+            },
+        ];
+
+        const body = document.getElementById('ct-body');
+        body.innerHTML = rows.map(r => `
+            <div class="ct-row">
+                <div class="ct-cell" style="color:${r.c1}; ${r.highlight === 'left' ? 'background:rgba(0,230,118,0.04);' : ''}">
+                    ${r.v1}
+                    ${r.highlight === 'left' ? '<span style="margin-left:8px; font-family:var(--mono); font-size:0.6rem; color:var(--green);">◀ WINNER</span>' : ''}
+                </div>
+                <div class="ct-label">${r.label}</div>
+                <div class="ct-cell right" style="color:${r.c2}; ${r.highlight === 'right' ? 'background:rgba(0,230,118,0.04);' : ''}">
+                    ${r.highlight === 'right' ? '<span style="margin-right:8px; font-family:var(--mono); font-size:0.6rem; color:var(--green);">WINNER ▶</span>' : ''}
+                    ${r.v2}
+                </div>
+            </div>
+        `).join('');
+
+        // Winner
+        const wtEl  = document.getElementById('winner-text');
+        const wbEl  = document.getElementById('winner-badge');
+        if (d1.gain > d2.gain) {
+            wtEl.textContent = `${t1} has higher return potential (${d1.gain}% vs ${d2.gain}%)`;
+            wtEl.style.color = 'var(--accent)';
+            wbEl.innerHTML = '<span class="badge badge-accent">BUY ' + t1 + '</span>';
+        } else if (d2.gain > d1.gain) {
+            wtEl.textContent = `${t2} has higher return potential (${d2.gain}% vs ${d1.gain}%)`;
+            wtEl.style.color = 'var(--purple)';
+            wbEl.innerHTML = '<span class="badge badge-purple">BUY ' + t2 + '</span>';
+        } else {
+            wtEl.textContent = 'Both assets show similar potential — hold positions.';
+            wtEl.style.color = 'var(--amber)';
+            wbEl.innerHTML = '<span class="badge badge-amber">NEUTRAL</span>';
+        }
+
+        document.getElementById('empty-state').style.display = 'none';
+        document.getElementById('result-area').style.display = 'block';
+
+    } catch(e) {
+        alert('Error: ' + e.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '▶ RUN COMPARISON (1 TOKEN)';
+    }
+}
+</script>
+{% endblock %}
