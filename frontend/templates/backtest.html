@@ -192,8 +192,22 @@
             <!-- Ticker -->
             <div>
                 <label class="field-label" for="bt-ticker">Asset / Ticker</label>
-                <input id="bt-ticker" class="form-input" placeholder="e.g. AAPL, BTC-USD" value="AAPL"
-                       style="font-family:var(--mono);font-weight:700;text-transform:uppercase;" maxlength="10">
+                <select id="bt-ticker" class="form-select" style="font-family:var(--mono);font-weight:700;">
+                    <optgroup label="STOCKS">
+                    {% for t in trained_stocks %}
+                    {% if '-USD' not in t %}
+                        <option value="{{ t }}" {% if t == 'AAPL' %}selected{% endif %}>{{ t }}</option>
+                    {% endif %}
+                    {% endfor %}
+                    </optgroup>
+                    <optgroup label="CRYPTO">
+                    {% for t in trained_stocks %}
+                    {% if '-USD' in t %}
+                        <option value="{{ t }}">{{ t }}</option>
+                    {% endif %}
+                    {% endfor %}
+                    </optgroup>
+                </select>
             </div>
 
             <!-- Horizon -->
@@ -357,11 +371,6 @@ document.querySelectorAll('#lookback-group .pill').forEach(p => {
         p.classList.add('active');
         selectedLookback = parseInt(p.dataset.val);
     });
-});
-
-// Ticker uppercase
-document.getElementById('bt-ticker').addEventListener('input', function() {
-    this.value = this.value.toUpperCase();
 });
 
 async function runBacktest() {
