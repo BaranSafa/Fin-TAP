@@ -1079,6 +1079,74 @@ def api_ai_screener():
     })
 
 
+@app.route("/api/ai/chat", methods=["POST"])
+@login_required
+@limiter.limit("30 per minute")
+@csrf.exempt
+def api_ai_chat():
+    payload = request.get_json(silent=True) or {}
+    message = str(payload.get("message", "")).strip()
+    page = str(payload.get("page", "")).strip("/")
+
+    if not message:
+        return jsonify({"error": "Message is required."}), 400
+    if len(message) > 600:
+        return jsonify({"error": "Message is too long. Keep it under 600 characters."}), 400
+
+    text = message.lower()
+    quick_links = []
+
+    if any(k in text for k in ("backtest", "short", "açığa", "aciga", "strateji")):
+        answer = (
+            "Backtest, seçtiğin hisse üzerinde RSI + SMA trend stratejisini geçmiş veride dener. "
+            "Allow Short Selling açıksa düşüş sinyallerinde short işlem de simüle edilir. "
+            "Sonuçlarda strategy return, buy-and-hold, win rate, max drawdown ve Sharpe ratio değerlerine bakmalısın."
+        )
+        quick_links = [{"label": "Open Backtester", "url": "/backtest"}]
+    elif any(k in text for k in ("tahmin", "forecast", "predict", "prediction", "model")):
+        answer = (
+            "AI Forecast sayfasında ticker, model, horizon ve teknik göstergeleri seçip fiyat tahmini alabilirsin. "
+            "Kısa vadede 7 veya 14 gün daha dengeli olur; 90 gün daha belirsizdir. "
+            "Tahmin sonrası AI Analyst Summary risk, güven ve beklenen getiri yorumunu verir."
+        )
+        quick_links = [{"label": "Open AI Forecast", "url": "/predict"}]
+    elif any(k in text for k in ("portfolio", "watchlist", "portföy", "portfoy", "takip")):
+        answer = (
+            "Portfolio sayfasında watchlist enstrümanlarını takip edebilirsin. "
+            "AI Portfolio Insight kartı listedeki en güçlü skoru, en riskli varlığı ve takip aksiyonlarını özetler."
+        )
+        quick_links = [{"label": "Open Portfolio", "url": "/portfolio"}]
+    elif any(k in text for k in ("screener", "hisse bul", "listele", "öner", "oner")):
+        answer = (
+            "All Stocks sayfasındaki AI Stock Screener, enstrümanları Balanced, Low Risk veya Momentum profiline göre sıralar. "
+            "Skor; trend, RSI, son hareket ve volatilite birleşiminden hesaplanır."
+        )
+        quick_links = [{"label": "Open Screener", "url": "/all_stocks"}]
+    elif any(k in text for k in ("token", "bakiye", "ödeme", "odeme", "pricing", "price")):
+        answer = (
+            "Prediction çalıştırmak token harcar. Sağ üstte mevcut token bakiyeni görebilirsin. "
+            "Token azaldığında Pricing sayfasından paket veya abonelik alabilirsin."
+        )
+        quick_links = [{"label": "Open Pricing", "url": "/prices"}]
+    elif any(k in text for k in ("risk", "rsi", "drawdown", "sharpe", "volatil")):
+        answer = (
+            "Risk okurken RSI tek başına yeterli değildir. RSI, trend, volatilite, max drawdown ve Sharpe ratio birlikte yorumlanmalı. "
+            "Drawdown büyüdükçe sermaye riski artar; Sharpe 1 üzerindeyse risk-ayarlı performans daha sağlıklı kabul edilir."
+        )
+    else:
+        page_hint = f" Şu an /{page} sayfasındasın; buradaki araçla ilgili daha spesifik soru sorabilirsin." if page else ""
+        answer = (
+            "Ben Fin-TAP asistanıyım. Forecast, backtest, portfolio, screener, tokenlar ve risk metrikleri hakkında yardımcı olabilirim."
+            f"{page_hint} Örnek: 'Backtest sonuçlarını nasıl yorumlarım?' veya 'Allow short selling ne işe yarar?'"
+        )
+
+    return jsonify({
+        "answer": answer,
+        "quick_links": quick_links,
+        "disclaimer": "Educational assistant only, not financial advice.",
+    })
+
+
 @app.route("/api/ohlc/<ticker>")
 @login_required
 @limiter.limit("60 per minute")

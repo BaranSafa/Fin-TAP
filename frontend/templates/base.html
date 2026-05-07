@@ -477,6 +477,137 @@
         .fade-up { animation: fadeUp 0.4s ease both; }
         .fade-up-2 { animation: fadeUp 0.4s ease 0.08s both; }
         .fade-up-3 { animation: fadeUp 0.4s ease 0.16s both; }
+
+        /* Floating AI Assistant */
+        #ai-chat-launch {
+            position: fixed;
+            right: 24px;
+            bottom: 24px;
+            z-index: 80;
+            width: 48px;
+            height: 48px;
+            border-radius: 8px;
+            border: 1px solid rgba(201,168,76,0.35);
+            background: var(--accent);
+            color: #09060A;
+            font-family: var(--mono);
+            font-weight: 800;
+            cursor: pointer;
+            box-shadow: 0 12px 30px rgba(0,0,0,0.28);
+        }
+        #ai-chat-panel {
+            position: fixed;
+            right: 24px;
+            bottom: 84px;
+            z-index: 80;
+            width: min(380px, calc(100vw - 48px));
+            height: min(520px, calc(100vh - 120px));
+            background: var(--surface);
+            border: 1px solid var(--border2);
+            border-radius: 10px;
+            box-shadow: 0 24px 70px rgba(0,0,0,0.45);
+            display: none;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        #ai-chat-panel.open { display: flex; }
+        .ai-chat-head {
+            padding: 13px 14px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+        .ai-chat-title {
+            font-weight: 800;
+            font-size: 0.88rem;
+        }
+        .ai-chat-sub {
+            font-family: var(--mono);
+            font-size: 0.56rem;
+            letter-spacing: 1.5px;
+            color: var(--text3);
+            margin-top: 2px;
+        }
+        .ai-chat-close {
+            width: 30px;
+            height: 30px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: var(--surface2);
+            color: var(--text2);
+            cursor: pointer;
+        }
+        #ai-chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .ai-msg {
+            max-width: 88%;
+            border-radius: 8px;
+            padding: 10px 11px;
+            font-size: 0.8rem;
+            line-height: 1.45;
+            border: 1px solid var(--border);
+        }
+        .ai-msg.user {
+            align-self: flex-end;
+            background: var(--accent);
+            color: #09060A;
+            border-color: rgba(201,168,76,0.4);
+        }
+        .ai-msg.bot {
+            align-self: flex-start;
+            background: var(--surface2);
+            color: var(--text);
+        }
+        .ai-chat-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 8px;
+        }
+        .ai-chat-links a {
+            font-family: var(--mono);
+            font-size: 0.62rem;
+            color: var(--accent);
+            text-decoration: none;
+            border: 1px solid rgba(201,168,76,0.25);
+            border-radius: 5px;
+            padding: 4px 7px;
+        }
+        .ai-chat-form {
+            padding: 12px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            gap: 8px;
+        }
+        #ai-chat-input {
+            flex: 1;
+            min-width: 0;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 7px;
+            padding: 10px 11px;
+            font-size: 0.8rem;
+            outline: none;
+        }
+        #ai-chat-send {
+            width: 42px;
+            border: none;
+            border-radius: 7px;
+            background: var(--accent);
+            color: #09060A;
+            font-family: var(--mono);
+            font-weight: 800;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
@@ -596,6 +727,90 @@
         {% block content %}{% endblock %}
     </div>
 </div>
+
+<button id="ai-chat-launch" type="button" title="Open AI Assistant">AI</button>
+<section id="ai-chat-panel" aria-label="AI Assistant">
+    <div class="ai-chat-head">
+        <div>
+            <div class="ai-chat-title">Fin-TAP AI Assistant</div>
+            <div class="ai-chat-sub">ASK ABOUT FORECASTS, BACKTESTS, RISK</div>
+        </div>
+        <button class="ai-chat-close" id="ai-chat-close" type="button">X</button>
+    </div>
+    <div id="ai-chat-messages">
+        <div class="ai-msg bot">
+            Merhaba, Fin-TAP icinde forecast, backtest, portfolio, screener ve risk metrikleri hakkinda yardimci olabilirim.
+        </div>
+    </div>
+    <form class="ai-chat-form" id="ai-chat-form">
+        <input id="ai-chat-input" type="text" maxlength="600" autocomplete="off" placeholder="Ask Fin-TAP AI...">
+        <button id="ai-chat-send" type="submit">Go</button>
+    </form>
+</section>
+
+<script>
+(() => {
+    const launch = document.getElementById('ai-chat-launch');
+    const panel = document.getElementById('ai-chat-panel');
+    const closeBtn = document.getElementById('ai-chat-close');
+    const form = document.getElementById('ai-chat-form');
+    const input = document.getElementById('ai-chat-input');
+    const messages = document.getElementById('ai-chat-messages');
+    const sendBtn = document.getElementById('ai-chat-send');
+
+    function addMessage(role, text, links = []) {
+        const item = document.createElement('div');
+        item.className = `ai-msg ${role}`;
+        item.textContent = text;
+        if (links.length) {
+            const wrap = document.createElement('div');
+            wrap.className = 'ai-chat-links';
+            links.forEach(link => {
+                const a = document.createElement('a');
+                a.href = link.url;
+                a.textContent = link.label;
+                wrap.appendChild(a);
+            });
+            item.appendChild(wrap);
+        }
+        messages.appendChild(item);
+        messages.scrollTop = messages.scrollHeight;
+    }
+
+    launch.addEventListener('click', () => {
+        panel.classList.toggle('open');
+        if (panel.classList.contains('open')) input.focus();
+    });
+    closeBtn.addEventListener('click', () => panel.classList.remove('open'));
+
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const text = input.value.trim();
+        if (!text) return;
+        input.value = '';
+        addMessage('user', text);
+        sendBtn.disabled = true;
+        sendBtn.textContent = '...';
+
+        try {
+            const res = await fetch('/api/ai/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: text, page: window.location.pathname })
+            });
+            const data = await res.json();
+            if (!res.ok || data.error) throw new Error(data.error || 'Assistant unavailable');
+            addMessage('bot', data.answer, data.quick_links || []);
+        } catch (err) {
+            addMessage('bot', err.message || 'Assistant is unavailable right now.');
+        } finally {
+            sendBtn.disabled = false;
+            sendBtn.textContent = 'Go';
+            input.focus();
+        }
+    });
+})();
+</script>
 
 {% block scripts %}{% endblock %}
 </body>
