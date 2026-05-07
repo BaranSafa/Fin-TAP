@@ -113,7 +113,10 @@ def run_backtest(
 
     # Test için yeterli geçmiş veri olması gerekiyor
     df = df.tail(lookback_days + horizon + 60).copy()
-    df = df.dropna(subset=["Close", "High", "Low", "Volume"])
+    required_cols = [c for c in ("Close", "High", "Low", "Volume") if c in df.columns]
+    if "Close" not in required_cols:
+        return None
+    df = df.dropna(subset=required_cols)
 
     if len(df) < horizon * 3:
         return None

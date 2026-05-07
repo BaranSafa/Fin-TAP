@@ -2257,14 +2257,19 @@ def backtest_page():
 def api_backtest_run():
     data = request.get_json(silent=True) or {}
 
-    ticker      = (data.get("ticker") or "").strip().upper()
-    horizon     = int(data.get("horizon", 14))
-    lookback    = int(data.get("lookback_days", 365))
-    capital     = float(data.get("start_capital", 1000.0))
+    ticker = (data.get("ticker") or "").strip().upper()
+    try:
+        horizon = int(data.get("horizon", 14))
+        lookback = int(data.get("lookback_days", 365))
+        capital = float(data.get("start_capital", 1000.0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Backtest inputs are invalid. Check horizon, period, and capital."}), 400
     allow_short = bool(data.get("allow_short", False))
 
     if not ticker or len(ticker) > 10:
         return jsonify({"error": "Invalid ticker."}), 400
+    if ticker not in VALID_TICKERS:
+        return jsonify({"error": f"{ticker} is not in the tracked instrument list."}), 400
     if horizon not in (7, 14, 30, 90):
         return jsonify({"error": "horizon must be 7, 14, 30 or 90."}), 400
     if lookback not in (90, 180, 365, 730):
@@ -2272,16 +2277,21 @@ def api_backtest_run():
     if not (100 <= capital <= 1_000_000):
         return jsonify({"error": "start_capital must be between 100 and 1,000,000."}), 400
 
-    result = run_backtest(
-        ticker=ticker,
-        horizon=horizon,
-        lookback_days=lookback,
-        start_capital=capital,
-        allow_short=allow_short,
-    )
+    try:
+        result = run_backtest(
+            ticker=ticker,
+            horizon=horizon,
+            lookback_days=lookback,
+            start_capital=capital,
+            allow_short=allow_short,
+        )
+    except Exception as e:
+        print(f"[backtest] {ticker}: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "Backtest engine error. Try refreshing market data or selecting another ticker."}), 500
 
     if result is None:
-        return jsonify({"error": "Insufficient data for this ticker."}), 422
+        return jsonify({"error": "Insufficient market data for this ticker. Try another ticker or refresh the data cache."}), 422
 
     return jsonify(result)
 
