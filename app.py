@@ -21,7 +21,7 @@ V0.7 Güncellemeleri:
 """
 from __future__ import annotations
 
-import os, sys, traceback, secrets, json, hashlib
+import os, sys, traceback, secrets, json, hashlib, math
 from datetime import datetime as _dt
 from urllib.parse import urlparse, urljoin
 from itsdangerous import URLSafeTimedSerializer, SignatureExpired, BadSignature
@@ -793,6 +793,291 @@ def api_sentiment(ticker):
 
 
 # ── OHLC / Candlestick API ─────────────────────────────────────────────────
+
+# ---- AI Insight helpers ----------------------------------------------------
+
+def _safe_float(value, default=None):
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _technical_snapshot(ticker: str) -> dict | None:
+    """Small deterministic analysis layer used by the AI insight endpoints."""
+    try:
+        df = get_processed_data(ticker)
+        if df is None or df.empty or "Close" not in df.columns:
+            return None
+
+        df = df.dropna(subset=["Close"]).copy()
+        if len(df) < 30:
+            return None
+
+        closes = df["Close"].astype(float)
+        current = float(closes.iloc[-1])
+        prev = float(closes.iloc[-2]) if len(closes) > 1 else current
+        change_1d = ((current - prev) / prev * 100) if prev else 0.0
+        change_20d = ((current - closes.iloc[-21]) / closes.iloc[-21] * 100) if len(closes) > 21 and closes.iloc[-21] else 0.0
+        change_60d = ((current - closes.iloc[-61]) / closes.iloc[-61] * 100) if len(closes) > 61 and closes.iloc[-61] else change_20d
+
+        sma20 = float(closes.tail(20).mean())
+        sma50 = float(closes.tail(50).mean()) if len(closes) >= 50 else sma20
+        vol20 = float(closes.pct_change().tail(20).std() * (252 ** 0.5) * 100)
+        if not math.isfinite(vol20):
+            vol20 = 0.0
+
+        diffs = closes.diff().dropna().tail(14)
+        gains = diffs.clip(lower=0).mean()
+        losses = (-diffs.clip(upper=0)).mean()
+        rs = gains / losses if losses else 99.0
+        rsi = 100 - (100 / (1 + rs))
+        if not math.isfinite(float(rsi)):
+            rsi = 50.0
+
+        if current > sma20 > sma50:
+            trend = "bullish"
+        elif current < sma20 < sma50:
+            trend = "bearish"
+        else:
+            trend = "mixed"
+
+        if rsi >= 70:
+            rsi_state = "overbought"
+        elif rsi <= 30:
+            rsi_state = "oversold"
+        else:
+            rsi_state = "neutral"
+
+        return {
+            "ticker": ticker,
+            "price": round(current, 4),
+            "change_1d": round(change_1d, 2),
+            "change_20d": round(change_20d, 2),
+            "change_60d": round(change_60d, 2),
+            "sma20": round(sma20, 4),
+            "sma50": round(sma50, 4),
+            "rsi": round(float(rsi), 2),
+            "rsi_state": rsi_state,
+            "trend": trend,
+            "volatility": round(vol20, 2),
+        }
+    except Exception as e:
+        print(f"[ai snapshot] {ticker}: {e}")
+        return None
+
+
+def _risk_level(snapshot: dict, expected_return: float | None = None) -> str:
+    score = 0
+    if snapshot.get("volatility", 0) >= 55:
+        score += 2
+    elif snapshot.get("volatility", 0) >= 35:
+        score += 1
+    if snapshot.get("rsi_state") in {"overbought", "oversold"}:
+        score += 1
+    if snapshot.get("trend") == "mixed":
+        score += 1
+    if expected_return is not None and abs(expected_return) >= 12:
+        score += 1
+    if score >= 3:
+        return "HIGH"
+    if score >= 1:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _score_snapshot(snapshot: dict, profile: str = "balanced") -> float:
+    trend_score = {"bullish": 28, "mixed": 10, "bearish": -18}.get(snapshot["trend"], 0)
+    momentum = max(min(snapshot["change_20d"], 25), -25)
+    rsi = snapshot["rsi"]
+    rsi_score = 12 if 45 <= rsi <= 62 else 6 if 35 <= rsi < 45 or 62 < rsi <= 70 else -10
+    vol_penalty = min(snapshot["volatility"] / 3, 22)
+    score = 50 + trend_score + momentum + rsi_score - vol_penalty
+    if profile == "low_risk":
+        score -= min(snapshot["volatility"] / 2, 28)
+    elif profile == "momentum":
+        score += max(min(snapshot["change_60d"], 30), -20) * 0.6
+    return round(max(0, min(100, score)), 1)
+
+
+@app.route("/api/ai/analyst", methods=["POST"])
+@login_required
+@limiter.limit("30 per minute")
+@csrf.exempt
+def api_ai_analyst():
+    payload = request.get_json(silent=True) or {}
+    ticker = str(payload.get("ticker", "AAPL")).upper().strip()
+    prediction = _safe_float(payload.get("prediction"))
+    horizon = int(payload.get("horizon", 14) or 14)
+
+    if ticker not in VALID_TICKERS:
+        return jsonify({"error": "Gecersiz ticker"}), 400
+
+    snap = _technical_snapshot(ticker)
+    if not snap:
+        return jsonify({"error": "Analiz verisi hazir degil"}), 422
+
+    expected_return = None
+    if prediction and snap["price"]:
+        expected_return = round((prediction - snap["price"]) / snap["price"] * 100, 2)
+
+    direction = "upside" if (expected_return or 0) > 1 else "downside" if (expected_return or 0) < -1 else "flat"
+    risk = _risk_level(snap, expected_return)
+    confidence = "HIGH" if snap["trend"] != "mixed" and risk != "HIGH" else "MEDIUM" if risk != "HIGH" else "LOW"
+
+    if direction == "upside":
+        summary = f"{ticker} shows a positive {horizon}-day setup, but confirmation should come from trend and risk controls."
+    elif direction == "downside":
+        summary = f"{ticker} has negative pressure in the {horizon}-day forecast, so capital protection matters more than entry timing."
+    else:
+        summary = f"{ticker} is close to neutral for the {horizon}-day horizon; the setup needs a cleaner signal."
+
+    bullets = [
+        f"Trend is {snap['trend']} with price near ${snap['price']}.",
+        f"RSI is {snap['rsi']} ({snap['rsi_state']}), which shapes short-term timing risk.",
+        f"20-day move is {snap['change_20d']}% and annualized volatility is about {snap['volatility']}%.",
+    ]
+    if expected_return is not None:
+        bullets.insert(0, f"Model-implied return potential is {expected_return:+.2f}%.")
+
+    return jsonify({
+        "ticker": ticker,
+        "summary": summary,
+        "bullets": bullets,
+        "risk": risk,
+        "confidence": confidence,
+        "expected_return": expected_return,
+        "disclaimer": "Educational analysis only, not financial advice.",
+        "snapshot": snap,
+    })
+
+
+@app.route("/api/ai/portfolio")
+@login_required
+@limiter.limit("20 per minute")
+@csrf.exempt
+def api_ai_portfolio():
+    items = Watchlist.query.filter_by(user_id=current_user.id).order_by(Watchlist.added_at.desc()).all()
+    snapshots = [s for s in (_technical_snapshot(item.symbol) for item in items) if s]
+
+    if not snapshots:
+        return jsonify({
+            "summary": "Add instruments to your watchlist to unlock AI portfolio insight.",
+            "best": None,
+            "riskiest": None,
+            "actions": [],
+            "items": [],
+        })
+
+    scored = []
+    for snap in snapshots:
+        score = _score_snapshot(snap)
+        scored.append({**snap, "score": score, "risk": _risk_level(snap)})
+
+    best = max(scored, key=lambda x: x["score"])
+    riskiest = max(scored, key=lambda x: (x["volatility"], abs(x["change_20d"])))
+    bullish_count = sum(1 for s in scored if s["trend"] == "bullish")
+    high_risk_count = sum(1 for s in scored if s["risk"] == "HIGH")
+
+    actions = []
+    if high_risk_count:
+        actions.append(f"Review position sizing on {high_risk_count} high-risk instrument(s).")
+    actions.append(f"Watch {best['ticker']} for continuation if price stays above SMA20.")
+    if riskiest["ticker"] != best["ticker"]:
+        actions.append(f"Use tighter alerts on {riskiest['ticker']} because volatility is {riskiest['volatility']}%.")
+
+    return jsonify({
+        "summary": (
+            f"{bullish_count}/{len(scored)} tracked instruments are in bullish trend. "
+            f"{best['ticker']} has the strongest blended score, while {riskiest['ticker']} carries the highest volatility risk."
+        ),
+        "best": best,
+        "riskiest": riskiest,
+        "actions": actions,
+        "items": sorted(scored, key=lambda x: x["score"], reverse=True),
+    })
+
+
+@app.route("/api/ai/backtest_explain", methods=["POST"])
+@login_required
+@limiter.limit("30 per minute")
+@csrf.exempt
+def api_ai_backtest_explain():
+    d = request.get_json(silent=True) or {}
+    ticker = str(d.get("ticker", "")).upper().strip()
+    total_return = _safe_float(d.get("total_return"), 0.0)
+    bah_return = _safe_float(d.get("bah_return"), 0.0)
+    win_rate = _safe_float(d.get("win_rate"), 0.0)
+    drawdown = _safe_float(d.get("max_drawdown"), 0.0)
+    sharpe = _safe_float(d.get("sharpe"), 0.0)
+    trade_count = int(d.get("trade_count") or 0)
+
+    edge = round(total_return - bah_return, 2)
+    risk = "HIGH" if drawdown >= 20 or sharpe < 0 else "MEDIUM" if drawdown >= 10 or sharpe < 1 else "LOW"
+
+    if edge > 3:
+        summary = f"The strategy beat buy-and-hold by {edge:+.2f}% on {ticker or 'this asset'}."
+    elif edge < -3:
+        summary = f"The strategy lagged buy-and-hold by {edge:+.2f}%, so the rules may be too defensive for this period."
+    else:
+        summary = "The strategy performed close to buy-and-hold; the edge is not strong enough by itself."
+
+    notes = [
+        f"Win rate is {win_rate}% across {trade_count} trades.",
+        f"Max drawdown is {drawdown}%, giving the run a {risk.lower()} risk profile.",
+        f"Sharpe ratio is {sharpe}, so risk-adjusted quality is {'strong' if sharpe >= 1 else 'weak' if sharpe < 0 else 'moderate'}.",
+    ]
+    suggestions = []
+    if trade_count < 5:
+        suggestions.append("Use a longer lookback before trusting the result.")
+    if drawdown >= 15:
+        suggestions.append("Try shorter horizons or disable short selling to reduce drawdown.")
+    if win_rate < 45:
+        suggestions.append("Tighten entries with RSI or trend confirmation.")
+    if not suggestions:
+        suggestions.append("Compare the same setup across 30d and 90d horizons before scaling it.")
+
+    return jsonify({
+        "summary": summary,
+        "risk": risk,
+        "edge_vs_buy_hold": edge,
+        "notes": notes,
+        "suggestions": suggestions,
+        "disclaimer": "Backtests are historical simulations, not guarantees.",
+    })
+
+
+@app.route("/api/ai/screener")
+@login_required
+@limiter.limit("10 per minute")
+@csrf.exempt
+def api_ai_screener():
+    profile = request.args.get("profile", "balanced").strip().lower()
+    if profile not in {"balanced", "low_risk", "momentum"}:
+        profile = "balanced"
+
+    rows = []
+    for ticker in TICKERS_TO_TRAIN:
+        snap = _technical_snapshot(ticker)
+        if not snap:
+            continue
+        score = _score_snapshot(snap, profile)
+        rows.append({
+            **snap,
+            "score": score,
+            "risk": _risk_level(snap),
+            "reason": f"{snap['trend']} trend, RSI {snap['rsi']}, 20d {snap['change_20d']:+.2f}%",
+        })
+
+    rows = sorted(rows, key=lambda x: x["score"], reverse=True)[:12]
+    return jsonify({
+        "profile": profile,
+        "summary": f"Top {len(rows)} instruments ranked by {profile.replace('_', ' ')} AI score.",
+        "results": rows,
+    })
+
 
 @app.route("/api/ohlc/<ticker>")
 @login_required

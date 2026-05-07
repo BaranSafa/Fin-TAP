@@ -152,6 +152,38 @@
         border-radius: 50%; animation: spin 0.7s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
+    .ai-card {
+        border: 1px solid rgba(0,212,255,0.18);
+        background: linear-gradient(180deg, rgba(0,212,255,0.06), rgba(15,19,24,0));
+    }
+    .ai-metrics {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        margin-top: 12px;
+    }
+    .ai-metric {
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        padding: 9px 10px;
+        background: var(--surface2);
+    }
+    .ai-metric span {
+        display: block;
+        font-family: var(--mono);
+        font-size: 0.55rem;
+        letter-spacing: 1.4px;
+        color: var(--text3);
+        margin-bottom: 4px;
+    }
+    .ai-metric strong { font-family: var(--mono); font-size: 0.82rem; }
+    .ai-list {
+        margin: 12px 0 0;
+        padding-left: 18px;
+        color: var(--text2);
+        font-size: 0.8rem;
+        line-height: 1.6;
+    }
 </style>
 
 <div class="config-grid fade-up">
@@ -350,6 +382,18 @@
             </div>
         </div>
 
+        <div id="ai-analyst-card" class="card card-pad ai-card" style="display:none;">
+            <div class="sec-label">// AI ANALYST SUMMARY</div>
+            <div id="ai-summary" style="font-weight:800;font-size:0.92rem;line-height:1.45;margin-top:6px;">-</div>
+            <div class="ai-metrics">
+                <div class="ai-metric"><span>RISK</span><strong id="ai-risk">-</strong></div>
+                <div class="ai-metric"><span>CONFIDENCE</span><strong id="ai-confidence">-</strong></div>
+                <div class="ai-metric"><span>IMPLIED RETURN</span><strong id="ai-return">-</strong></div>
+            </div>
+            <ul class="ai-list" id="ai-bullets"></ul>
+            <div id="ai-disclaimer" style="font-family:var(--mono);font-size:0.6rem;color:var(--text3);margin-top:10px;"></div>
+        </div>
+
         <!-- Market Chart (Candlestick + Indicators) -->
         <div class="card" id="market-chart-card" style="overflow:hidden;">
             <div style="padding:10px 16px 8px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
@@ -496,6 +540,7 @@ async function runPrediction() {
 
         // Draw chart
         drawChart(data.chart_data, ticker);
+        loadAiAnalyst(ticker, data.prediction);
 
     } catch(e) {
         alert('Error: ' + e.message);
@@ -507,6 +552,37 @@ async function runPrediction() {
 
 /* ── Sentiment ── */
 let _lastSentTicker = null;
+
+async function loadAiAnalyst(ticker, prediction) {
+    const card = document.getElementById('ai-analyst-card');
+    card.style.display = 'block';
+    document.getElementById('ai-summary').textContent = 'Generating analyst summary...';
+    document.getElementById('ai-bullets').innerHTML = '';
+    document.getElementById('ai-risk').textContent = '-';
+    document.getElementById('ai-confidence').textContent = '-';
+    document.getElementById('ai-return').textContent = '-';
+
+    try {
+        const res = await fetch('/api/ai/analyst', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ticker, prediction, horizon: selectedHorizon })
+        });
+        const d = await res.json();
+        if (!res.ok || d.error) throw new Error(d.error || 'AI summary failed');
+
+        const riskColor = d.risk === 'HIGH' ? 'var(--red)' : d.risk === 'MEDIUM' ? 'var(--amber)' : 'var(--green)';
+        document.getElementById('ai-summary').textContent = d.summary;
+        document.getElementById('ai-risk').textContent = d.risk;
+        document.getElementById('ai-risk').style.color = riskColor;
+        document.getElementById('ai-confidence').textContent = d.confidence;
+        document.getElementById('ai-return').textContent = d.expected_return === null ? '-' : `${d.expected_return > 0 ? '+' : ''}${d.expected_return}%`;
+        document.getElementById('ai-bullets').innerHTML = (d.bullets || []).map(x => `<li>${x}</li>`).join('');
+        document.getElementById('ai-disclaimer').textContent = d.disclaimer;
+    } catch(e) {
+        document.getElementById('ai-summary').textContent = 'AI analyst summary is unavailable for this run.';
+    }
+}
 
 async function loadSentiment(ticker) {
     if (ticker === _lastSentTicker) return;

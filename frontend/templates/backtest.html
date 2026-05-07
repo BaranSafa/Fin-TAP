@@ -167,6 +167,13 @@
         color: var(--text2);
         line-height: 1.5;
     }
+    .ai-note-list {
+        margin: 10px 0 0;
+        padding-left: 18px;
+        color: var(--text2);
+        font-size: 0.8rem;
+        line-height: 1.6;
+    }
 </style>
 
 <div class="bt-grid fade-up">
@@ -290,6 +297,18 @@
             </div>
         </div>
 
+        <div class="chart-card" id="ai-explain-card" style="display:none;">
+            <div class="chart-header">
+                <div class="chart-title">AI Backtest Explainer</div>
+                <div id="ai-bt-risk" class="sec-label" style="margin:0;"></div>
+            </div>
+            <div class="chart-body">
+                <div id="ai-bt-summary" style="font-weight:800;font-size:0.9rem;line-height:1.45;">-</div>
+                <ul id="ai-bt-notes" class="ai-note-list"></ul>
+                <div id="ai-bt-suggestions" style="margin-top:10px;"></div>
+            </div>
+        </div>
+
         <!-- Trades table (hidden until result) -->
         <div class="chart-card" id="trades-card" style="display:none;">
             <div class="chart-header">
@@ -376,6 +395,7 @@ async function runBacktest() {
         if (!res.ok) { alert(data.error || 'Backtest failed.'); return; }
 
         renderResults(data);
+        loadBacktestAI(ticker, data);
     } catch(e) {
         alert('Network error. Please try again.');
     } finally {
@@ -503,6 +523,36 @@ function renderResults(d) {
             </tr>
         `);
     });
+}
+
+async function loadBacktestAI(ticker, data) {
+    const card = document.getElementById('ai-explain-card');
+    card.style.display = 'block';
+    document.getElementById('ai-bt-summary').textContent = 'Reading backtest behavior...';
+    document.getElementById('ai-bt-notes').innerHTML = '';
+    document.getElementById('ai-bt-suggestions').innerHTML = '';
+    document.getElementById('ai-bt-risk').textContent = '';
+
+    try {
+        const r = await fetch('/api/ai/backtest_explain', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ticker, ...data })
+        });
+        const d = await r.json();
+        if (!r.ok || d.error) throw new Error(d.error || 'AI explainer failed');
+
+        const riskColor = d.risk === 'HIGH' ? 'var(--red)' : d.risk === 'MEDIUM' ? 'var(--amber)' : 'var(--green)';
+        document.getElementById('ai-bt-summary').textContent = d.summary;
+        document.getElementById('ai-bt-risk').textContent = `RISK ${d.risk}`;
+        document.getElementById('ai-bt-risk').style.color = riskColor;
+        document.getElementById('ai-bt-notes').innerHTML = (d.notes || []).map(x => `<li>${x}</li>`).join('');
+        document.getElementById('ai-bt-suggestions').innerHTML = (d.suggestions || []).map(x =>
+            `<div style="padding:8px 0;border-top:1px solid var(--border);font-size:0.8rem;color:var(--text2);">${x}</div>`
+        ).join('');
+    } catch(e) {
+        document.getElementById('ai-bt-summary').textContent = 'AI backtest explainer is unavailable for this run.';
+    }
 }
 
 function fmt(n) {

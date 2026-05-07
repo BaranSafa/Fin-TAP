@@ -56,9 +56,62 @@
     #search-input::placeholder { color: var(--text3); }
 
     .count-label { font-family: var(--mono); font-size: 0.65rem; color: var(--text3); margin-bottom: 12px; }
+    .screen-row {
+        display: grid;
+        grid-template-columns: 80px 80px 1fr 70px;
+        gap: 10px;
+        align-items: center;
+        padding: 10px 0;
+        border-top: 1px solid var(--border);
+        font-size: 0.78rem;
+    }
+    .screen-score {
+        font-family: var(--mono);
+        font-weight: 800;
+        color: var(--accent);
+    }
+    .screen-btn {
+        background: var(--accent);
+        color: #000;
+        border: none;
+        border-radius: 7px;
+        padding: 9px 14px;
+        font-weight: 800;
+        cursor: pointer;
+    }
+    .screen-open {
+        border: 1px solid rgba(0,212,255,0.2);
+        color: var(--accent);
+        border-radius: 5px;
+        padding: 4px 10px;
+        font-family: var(--mono);
+        font-size: 0.6rem;
+        font-weight: 700;
+        text-align: center;
+        text-decoration: none;
+    }
 </style>
 
 <div class="fade-up">
+    <div class="card card-pad" style="margin-bottom:16px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+            <div>
+                <div class="sec-label">// AI STOCK SCREENER</div>
+                <div style="font-weight:800;font-size:0.92rem;margin-top:4px;">Rank instruments by technical AI score</div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;">
+                <select id="screen-profile" class="form-select" style="width:150px;">
+                    <option value="balanced">Balanced</option>
+                    <option value="low_risk">Low Risk</option>
+                    <option value="momentum">Momentum</option>
+                </select>
+                <button class="screen-btn" onclick="runScreener()">Run</button>
+            </div>
+        </div>
+        <div id="screen-summary" style="font-family:var(--mono);font-size:0.66rem;color:var(--text3);margin-top:12px;">Choose a profile and run the screener.</div>
+        <div id="screen-results" style="margin-top:8px;"></div>
+    </div>
+
     <!-- Search -->
     <div class="search-wrap">
         <span class="search-icon">🔍</span>
@@ -145,6 +198,32 @@ async function toggleWatchlist(event, sym) {
         console.error(e);
     } finally {
         btn.style.opacity = '';
+    }
+}
+
+async function runScreener() {
+    const profile = document.getElementById('screen-profile').value;
+    const summary = document.getElementById('screen-summary');
+    const results = document.getElementById('screen-results');
+    summary.textContent = 'Screening instruments...';
+    results.innerHTML = '';
+
+    try {
+        const r = await fetch(`/api/ai/screener?profile=${encodeURIComponent(profile)}`);
+        const d = await r.json();
+        if (!r.ok || d.error) throw new Error(d.error || 'Screener failed');
+
+        summary.textContent = d.summary;
+        results.innerHTML = (d.results || []).slice(0, 8).map(row => `
+            <div class="screen-row">
+                <div><span class="sc-ticker">${row.ticker}</span></div>
+                <div class="screen-score">${row.score}</div>
+                <div style="color:var(--text2);">${row.reason}</div>
+                <a href="/predict?ticker=${row.ticker}" class="screen-open">Open</a>
+            </div>
+        `).join('');
+    } catch(e) {
+        summary.textContent = 'AI screener is unavailable right now.';
     }
 }
 </script>
