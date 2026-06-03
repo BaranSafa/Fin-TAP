@@ -1,19 +1,3 @@
-"""
-train.py  —  Fin-TAP Sistem Kurulum Dosyası
-============================================
-Bu dosyanın iki görevi var:
-
-1. TICKERS_TO_TRAIN listesini tanımlar — uygulama hangi hisse/kripto
-   sembollerini desteklediğini buradan öğrenir. app.py bu listeyi import eder.
-
-2. `python train.py` olarak çalıştırıldığında her sembol için boş bir
-   placeholder .joblib dosyası oluşturur. Gerçek modeller tahmin sırasında
-   dynamic_trainer.py tarafından bellekte eğitilir; bu dosyalar sadece
-   sistemin hangi sembolleri tanıdığını kayıt altına almak içindir.
-
-Yeni bir hisse veya kripto eklemek istersen STOCKS veya CRYPTO listesine
-sembolü ekle, ardından `python train.py` komutunu bir kez çalıştır.
-"""
 import os
 import joblib
 

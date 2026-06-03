@@ -1,45 +1,3 @@
-"""
-dynamic_trainer.py  —  Fin-TAP Backend
-=========================================
-Uygulamanın kalbi: makine öğrenmesi modeli eğitir ve fiyat tahmini yapar.
-
-── NASIL ÇALIŞIR? ──────────────────────────────────────────────────────────
-  train_and_predict_dynamic(ticker, model_type, feature_groups, horizon)
-       ↓
-  1. data_manager'dan işlenmiş veri ve teknik göstergeler al
-  2. Kullanıcının seçtiği feature gruplarını filtrele (RSI, MACD, vb.)
-  3. %90 eğitim / %10 test bölümü yap
-  4. Seçilen modeli eğit (Ridge, RandomForest, XGBoost, LSTM vb.)
-  5. Test seti üzerinde backtest yap → grafik verisi üret
-  6. Son N güne bakarak gelecek fiyatları tahmin et (rolling window)
-  7. Tahmin edilen fiyatlar + grafik verisi döndür
-
-── MODEL TİPLERİ ───────────────────────────────────────────────────────────
-  LINEAR        : Ridge regresyon — hızlı, basit, iyi başlangıç
-  RANDOM_FOREST : Rastgele orman — güçlü, aşırı öğrenmeye dayanıklı
-  EXTRA_TREES   : Aşırı rastgele ağaçlar — daha hızlı varyant
-  GRADIENT_BOOST: Gradyan artırma — yüksek doğruluk, yavaş
-  XGBOOST       : XGBoost — yarışma standardı, hızlı ve güçlü
-  LIGHTGBM      : LightGBM — büyük veri için optimize edilmiş
-  LSTM          : Derin öğrenme — zaman serisi için, en yavaş
-
-── TAHMİN MANTIĞI ──────────────────────────────────────────────────────────
-  Model, bir sonraki günün logaritmik getirisini (lr) tahmin eder.
-  Logaritmik getiri: lr = log(bugünkü_fiyat / önceki_fiyat)
-  Tahmin edilen fiyat: son_fiyat × e^(lr)
-  Bu yöntem yüzdesel fiyat değişimi yerine log-return kullanır çünkü
-  daha stabil ve aşırı büyük/küçük değerlere karşı daha sağlamdır.
-
-── MODEL CACHE ─────────────────────────────────────────────────────────────
-  Aynı ticker+model+feature kombinasyonu 30 dakika bellekte tutulur.
-  LSTM modelleri cache'lenmez (bellek çok büyük olur).
-
-V0.7 Düzeltmeleri:
-  1. Feature seçim bug'ı düzeltildi: DEFAULT_GROUPS artık her zaman eklenmez.
-  2. Hata durumunda rastgele gürültü yerine son fiyat kullanılır.
-  3. Clip limiti 0.10 → 0.15 (BTC gibi volatil varlıklar için).
-  4. Model cache eklendi (30 dk TTL, max 20 model).
-"""
 from __future__ import annotations
 
 import warnings; warnings.filterwarnings("ignore")
@@ -85,7 +43,7 @@ except ImportError:
 #  yeniden eğitmek yerine bellekten döndür → hız kazanımı
 # ──────────────────────────────────────────────────────────────
 _MODEL_CACHE: dict = {}   # {cache_key: {"model": ..., "sc": ..., "feat_set": ..., "at": float}}
-_MODEL_CACHE_TTL = 1800   # 30 dakika (saniye cinsinden)
+_MODEL_CACHE_TTL = 1800  
 
 
 def _cache_key(ticker: str, model_type: str, groups: list) -> str:
@@ -118,13 +76,6 @@ def _set_cached_model(key: str, model, sc, feat_set: list):
 def _compute_row(
     p: list, h: list, lo: list, v: list, feat_cols: list
 ) -> dict:
-    """
-    p (prices), h (high), lo (low), v (volume) listelerinden
-    tek bir feature satırı (dict) üretir.
-    Gelecek tahmini için kullanılır: her adımda yeni fiyat tahmin edilir,
-    bu fonksiyonla o fiyatın göstergeleri hesaplanır, bir sonraki adım için
-    girdi oluşturulur (rolling/iterative prediction).
-    """
     n = len(p)
 
     def s(lst, w):
@@ -286,21 +237,6 @@ def train_and_predict_dynamic(
     selected_feature_groups: list,
     horizon: int = 14,
 ) -> tuple:
-    """
-    Belirtilen hisse için model eğit ve gelecek fiyat tahmini yap.
-
-    Parametreler
-    ------------
-    ticker                 : hisse/kripto sembolü (örn. 'AAPL')
-    model_type             : 'LINEAR' | 'RANDOM_FOREST' | 'XGBOOST' | 'LSTM' | ...
-    selected_feature_groups: kullanılacak teknik gösterge grupları (örn. ['RSI', 'MACD'])
-    horizon                : kaç günlük ileri tahmin — 7 | 14 | 30 | 90
-
-    Döndürür
-    --------
-    (future_prices, chart_data) — tahmin listesi + grafik verisi
-    (None, None)               — hata durumunda
-    """
     if horizon not in VALID_HORIZONS:
         horizon = 14   # geçersiz değer gelirse varsayılana dön
 
@@ -311,9 +247,6 @@ def train_and_predict_dynamic(
         return None, None
 
     # ── Adım 2: Feature seçimi ───────────────────────────────────────────────
-    # Kullanıcının seçtiği gruplardan sütun isimlerini topla.
-    # Bug notu: DEFAULT_GROUPS kullanıcı seçimiyle birleştirilmez,
-    # sadece seçim tamamen boşsa devreye girer.
     groups   = selected_feature_groups if selected_feature_groups else DEFAULT_GROUPS
     feat_set = []
     for g in groups:
@@ -324,7 +257,6 @@ def train_and_predict_dynamic(
 
     print(f"[trainer] {ticker} | {model_type} | {len(feat_set)} feat | {len(df)} satır")
 
-    # En az 3 gösterge olmalı, yoksa varsayılana dön
     if len(feat_set) < 3:
         print("[trainer] yetersiz feature — DEFAULT_GROUPS kullanılıyor")
         feat_set = []
@@ -336,10 +268,9 @@ def train_and_predict_dynamic(
             return None, None
 
     # ── Adım 3: X (özellikler) ve y (hedef) hazırla ─────────────────────────
-    # target_lr = bir sonraki günün log-return değeri (tahmin edilecek şey)
     X_df   = df[feat_set].copy()
     y_s    = df["target_lr"].copy()
-    valid  = X_df.notna().all(axis=1) & y_s.notna()   # eksik değerleri atla
+    valid  = X_df.notna().all(axis=1) & y_s.notna()   
     X_df   = X_df[valid]
     y_s    = y_s[valid]
     closes = df.loc[valid, "Close"]
@@ -353,10 +284,9 @@ def train_and_predict_dynamic(
 
     # ── Adım 4: Eğitim/Test bölünmesi (%90 eğitim, %10 test) ───────────────
     split    = int(len(X) * 0.90)
-    close_te = closes.values[split:]   # test seti kapanış fiyatları (backtest için)
+    close_te = closes.values[split:]  
 
     # ── Adım 5: Cache kontrolü ──────────────────────────────────────────────
-    # Aynı kombinasyon 30 dakika içinde tekrar istenirse modeli yeniden eğitme
     c_key   = _cache_key(ticker, model_type, groups)
     cached  = _get_cached_model(c_key)
     is_lstm = model_type == "LSTM"
@@ -376,19 +306,14 @@ def train_and_predict_dynamic(
         model    = None
 
         # ── Adım 6: Model eğitimi ────────────────────────────────────────────
-        # RobustScaler: verileri medyan ve IQR'a göre ölçekler.
-        # Aşırı değerlere (outlier) karşı StandardScaler'dan daha sağlamdır.
-        # Önce fit_transform (eğitim seti) → ardından sadece transform (test seti).
         try:
             if model_type == "LINEAR":
                 # Ridge regresyon: L2 regularizasyonlu lineer model.
-                # alpha=2.0 → aşırı öğrenmeye karşı güçlü düzeltme
                 model = Ridge(alpha=2.0)
                 model.fit(X_tr, y_tr)
 
             elif model_type == "RANDOM_FOREST":
                 # 100 bağımsız karar ağacı eğitilir; sonuçların ortalaması tahmin olur.
-                # max_depth=8 → ağaçlar çok derin büyümez → aşırı öğrenme önlenir
                 model = RandomForestRegressor(
                     n_estimators=100, max_depth=8, min_samples_leaf=5,
                     n_jobs=1, random_state=42
@@ -397,7 +322,6 @@ def train_and_predict_dynamic(
 
             elif model_type == "EXTRA_TREES":
                 # Random Forest'a benzer ama bölünme noktaları tamamen rastgele seçilir.
-                # Daha hızlıdır, bazen daha iyi genelleme yapar.
                 model = ExtraTreesRegressor(
                     n_estimators=100, max_depth=8, min_samples_leaf=5,
                     n_jobs=1, random_state=42
@@ -406,8 +330,6 @@ def train_and_predict_dynamic(
 
             elif model_type == "GRADIENT_BOOST":
                 # Her yeni ağaç önceki ağacın hatasını düzeltmeye çalışır.
-                # learning_rate=0.05 → küçük adımlar → daha stabil öğrenme
-                # subsample=0.8 → her ağaçta verinin %80'i kullanılır (stochastic GB)
                 model = GradientBoostingRegressor(
                     n_estimators=150, learning_rate=0.05, max_depth=4,
                     subsample=0.8, min_samples_leaf=5, random_state=42
@@ -418,8 +340,6 @@ def train_and_predict_dynamic(
                 if not HAS_XGB:
                     raise ImportError("xgboost kurulu değil — requirements.txt'e ekle")
                 # XGBoost: en popüler ML yarışma algoritması.
-                # colsample_bytree=0.8 → her ağaçta feature'ların %80'ini kullan
-                # reg_lambda=2.0 → L2 regularizasyon
                 model = xgb.XGBRegressor(
                     n_estimators=200, learning_rate=0.05, max_depth=5,
                     subsample=0.8, colsample_bytree=0.8, reg_lambda=2.0,
@@ -431,7 +351,6 @@ def train_and_predict_dynamic(
                 if not HAS_LGB:
                     raise ImportError("lightgbm kurulu değil — requirements.txt'e ekle")
                 # LightGBM: büyük veri setleri için XGBoost alternatifi.
-                # num_leaves=31 → ağaç karmaşıklığı, min_child_samples=20 → aşırı öğrenme önlemi
                 model = lgb.LGBMRegressor(
                     n_estimators=200, learning_rate=0.05, num_leaves=31,
                     min_child_samples=20, reg_lambda=2.0,
@@ -443,8 +362,8 @@ def train_and_predict_dynamic(
                 if not HAS_TF:
                     raise ImportError("tensorflow kurulu değil — Render free 512MB'a sığmayabilir")
                 is_lstm = True
-                seq_len = 15   # modele son 15 günü bak diyoruz (zaman penceresi)
-                nf      = X_sc.shape[1]   # feature sayısı
+                seq_len = 15   
+                nf      = X_sc.shape[1]  
 
                 def mk_seq(Xd, yd, seq):
                     """Zaman serisi pencereleri oluştur: [t-seq:t] → y[t]"""
@@ -455,15 +374,14 @@ def train_and_predict_dynamic(
 
                 Xs, ys = mk_seq(X_sc, y, seq_len)
                 sp2    = int(len(Xs) * 0.90)
-                # LSTM mimarisi: 2 katman + Dropout (aşırı öğrenme önlemi)
                 model = Sequential([
                     Input(shape=(seq_len, nf)),
-                    LSTM(64, return_sequences=True),   # 64 hücre, çıktıyı sonrakine aktar
-                    Dropout(0.2),                       # %20 nöron rastgele kapat
-                    LSTM(32),                           # 32 hücre, son adım çıktısı
-                    Dense(1),                           # tek sayı tahmin et (log-return)
+                    LSTM(64, return_sequences=True),   
+                    Dropout(0.2),                      
+                    LSTM(32),                           
+                    Dense(1),                           
                 ])
-                model.compile(optimizer="adam", loss="huber")   # Huber: aşırı değerlere dayanıklı
+                model.compile(optimizer="adam", loss="huber")  
                 model.fit(
                     Xs[:sp2], ys[:sp2],
                     validation_data=(Xs[sp2:], ys[sp2:]),
@@ -481,7 +399,6 @@ def train_and_predict_dynamic(
             traceback.print_exc()
             return None, None
 
-        # LSTM modelleri cache'lenmez — TensorFlow modelleri çok fazla bellek kullanır
         if not is_lstm:
             _set_cached_model(c_key, model, sc, feat_set)
 
@@ -565,9 +482,6 @@ def train_and_predict_dynamic(
         return None, None
 
     # ── Adım 9: Grafik verisi oluştur ───────────────────────────────────────
-    # Grafik iki bölümden oluşur:
-    #   - Sol taraf: test seti (gerçek vs tahmin — backtest)
-    #   - Sağ taraf: gelecek (sadece tahmin, gerçek yok)
     last_date    = df.index[-1]
     future_dates = [
         (last_date + timedelta(days=i)).strftime("%Y-%m-%d")

@@ -1,24 +1,3 @@
-"""
-app.py  —  Fin-TAP  (Render production-grade)
-
-V0.8 Güncellemeleri:
-  1. Stripe Payment Integration: token paketleri için checkout session
-  2. Stripe Webhook: ödeme tamamlandığında token bakiyesi güncelleme
-  3. /payment/success sayfası eklendi
-  4. prices.html buy butonları aktive edildi
-
-V0.7 Güncellemeleri:
-  1. Flask-Limiter: Rate limiting eklendi (DDoS koruması)
-  2. Flask-WTF: CSRF koruması form route'larına eklendi
-  3. Güvenli SECRET_KEY: Env var yoksa rastgele üretir
-  4. Email enumeration düzeltildi (generic hata mesajı)
-  5. /db-test ve /db-kur ADMIN_SECRET ile korundu
-  6. Ticker ve feature group input validation eklendi
-  7. Şifre güvenlik kontrolü backend'e taşındı (min 8 karakter)
-  8. Watchlist CRUD endpoint'leri eklendi
-  9. Tahmin doğruluk takibi endpoint'i eklendi
-  10. Token bakiyesi prediction response'da anlık döndürülüyor
-"""
 from __future__ import annotations
 
 import os, sys, traceback, secrets, json, hashlib, math
@@ -207,11 +186,7 @@ def get_wallet():
 
 
 def _admin_check() -> bool:
-    """
-    /db-test ve /db-kur için ADMIN_SECRET kontrolü.
-    ADMIN_SECRET ayarlanmamışsa erişim reddedilir (güvenli default).
-    Secret, URL query param yerine X-Admin-Secret header'ından okunur.
-    """
+
     admin_secret = os.environ.get("ADMIN_SECRET", "")
     if not admin_secret:
         return False   # Hiç env var yoksa reddet — asla dev mode'da açma
@@ -222,11 +197,7 @@ def _admin_check() -> bool:
 
 
 def _is_admin() -> bool:
-    """
-    /admin rotası için: kullanıcı giriş yapmış olmalı VE
-    ADMIN_EMAIL env var'ında e-postası bulunmalı.
-    ADMIN_EMAIL ayarlanmamışsa ADMIN_SECRET header fallback'i kullanılır.
-    """
+
     if not current_user.is_authenticated:
         return False
     admin_emails_raw = os.environ.get("ADMIN_EMAIL", "")
@@ -301,10 +272,7 @@ def api_cache_clear():
 @app.route("/api/refresh")
 @limiter.limit("5 per hour")
 def api_refresh():
-    """
-    Cron job bu endpoint'i çağırır → tüm tickerları günceller.
-    CRON_SECRET env var ayarlanmışsa kimlik doğrulama zorunlu.
-    """
+
     secret   = request.args.get("secret", "")
     expected = os.environ.get("CRON_SECRET", "")
 
@@ -359,7 +327,6 @@ def _market_open_check():
 
 @app.route("/db-test")
 def db_test():
-    """DB bağlantısını test et — ADMIN_SECRET ile korumalı."""
     if not _admin_check():
         return jsonify({"error": "Yetkisiz erişim"}), 403
 
@@ -379,10 +346,6 @@ def db_test():
 
 @app.route("/db-kur")
 def db_kur():
-    """
-    Tabloları yarat veya güncelle — ADMIN_SECRET ile korumalı.
-    İlk deploy veya şema değişikliği sonrası bir kez ziyaret et.
-    """
     if not _admin_check():
         return jsonify({"error": "Yetkisiz erişim"}), 403
 
@@ -507,7 +470,6 @@ def portfolio():
 @app.route("/admin")
 @login_required
 def admin_panel():
-    """Admin dashboard — giriş yapmış + ADMIN_EMAIL/ADMIN_SECRET yetkisi zorunlu."""
     if not _is_admin():
         return redirect(url_for("root"))
     try:
@@ -1152,10 +1114,6 @@ def api_ai_chat():
 @limiter.limit("60 per minute")
 @csrf.exempt
 def api_ohlc(ticker):
-    """
-    Son 120 günlük OHLCV + teknik göstergeler döndür.
-    Lightweight Charts formatı: {time, open, high, low, close}
-    """
     if ticker not in VALID_TICKERS:
         return jsonify({"error": "Geçersiz ticker"}), 400
 
@@ -1251,7 +1209,6 @@ def api_ohlc(ticker):
 @limiter.limit("60 per minute")
 @csrf.exempt
 def api_watchlist_get():
-    """Kullanıcının takip listesini döndür."""
     items = Watchlist.query.filter_by(user_id=current_user.id)\
                     .order_by(Watchlist.added_at.desc()).all()
     result = []
@@ -1280,7 +1237,6 @@ def api_watchlist_get():
 @limiter.limit("30 per hour")
 @csrf.exempt
 def api_watchlist_add():
-    """Takip listesine hisse ekle."""
     payload = request.get_json(silent=True) or {}
     symbol  = str(payload.get("symbol", "")).upper().strip()
 
@@ -1440,11 +1396,6 @@ def api_alerts_cancel(alert_id):
 @app.route("/api/alerts/check")
 @csrf.exempt
 def api_alerts_check():
-    """
-    Cron endpoint: aktif alarmları kontrol et, tetiklenenlere email gönder.
-    CRON_SECRET header ile korunur.
-    Render Cron Job: GET /api/alerts/check  (her 15 dakikada bir)
-    """
     expected = os.environ.get("CRON_SECRET", "")
     if not expected:
         return jsonify({"error": "CRON_SECRET not configured"}), 503
@@ -1521,7 +1472,6 @@ def api_alerts_check():
 # ── Paper Trading API ──────────────────────────────────────────────────────
 
 def _get_or_create_paper(user_id: int) -> PaperPortfolio:
-    """Kullanıcının sanal portföyünü getir; yoksa oluştur."""
     p = PaperPortfolio.query.filter_by(user_id=user_id).first()
     if not p:
         p = PaperPortfolio(user_id=user_id, cash=PAPER_STARTING_CASH)
@@ -1545,7 +1495,6 @@ def paper_page():
 @limiter.limit("60 per minute")
 @csrf.exempt
 def api_paper_portfolio():
-    """Nakit + açık pozisyonlar + gerçek zamanlı P&L."""
     port = _get_or_create_paper(current_user.id)
     positions = PaperPosition.query.filter_by(user_id=current_user.id).all()
 
@@ -1811,10 +1760,6 @@ def api_correlation():
 @limiter.limit("5 per hour")
 @csrf.exempt
 def api_accuracy_update():
-    """
-    Geçmiş tahminlerin doğruluğunu günceller.
-    Tahmin tarihinden 14 gün sonra gerçek kapanış fiyatını çekip karşılaştırır.
-    """
     from datetime import datetime, timedelta
     updated = 0
     errors  = 0
@@ -1866,7 +1811,6 @@ def api_accuracy_update():
 @limiter.limit("20 per hour")
 @csrf.exempt
 def api_create_checkout():
-    """Stripe Checkout oturumu oluştur → URL döndür, frontend oraya yönlendirir."""
     if not _stripe_ok:
         return jsonify({"error": "Ödeme sistemi henüz aktif değil. STRIPE_SECRET_KEY env var'ı ayarlanmamış."}), 503
 
@@ -2060,7 +2004,6 @@ def stripe_webhook():
 @app.route("/payment/success")
 @login_required
 def payment_success():
-    """Stripe başarılı ödeme sonrası yönlendirme sayfası."""
     w = get_wallet()
     return render_template("payment_success.html", user=current_user,
                            balance=w.balance,
@@ -2163,7 +2106,6 @@ def _reset_serializer():
 
 
 def _send_reset_email(user, reset_url: str):
-    """E-posta gönder. MAIL_SERVER ayarlanmamışsa False döner (dev mode)."""
     if not app.config.get("MAIL_SERVER"):
         return False
     try:

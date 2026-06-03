@@ -1,12 +1,3 @@
-"""
-run.py  —  Fin-TAP Geliştirme Sunucusu Başlatıcı
-==================================================
-Bu dosyayı çalıştırmak yeterli: `python run.py`
-Sunucu başladıktan sonra tarayıcından http://127.0.0.1:5000 adresine git.
-
-NOT: Bu dosya sadece YEREL GELİŞTİRME içindir.
-     Render / Heroku gibi sunucularda gunicorn kullanılır (Procfile'da tanımlı).
-"""
 from app import app
 import os
 import sys
