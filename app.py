@@ -35,9 +35,9 @@ try:
     from backend.dynamic_trainer import train_and_predict_dynamic
     from backend.model_manager   import get_suggestion_metrics
     from backend.data_manager    import get_processed_data, FEATURE_GROUPS
-    print("[app] Backend modülleri yüklendi OK")
+    print("[app] Backend modules loaded OK")
 except ImportError as e:
-    print(f"[app] Backend import hatası: {e}")
+    print(f"[app] Backend import error: {e}")
     traceback.print_exc()
     def train_and_predict_dynamic(*a, **kw): return None, None
     def get_suggestion_metrics(*a, **kw):    return None
@@ -46,12 +46,12 @@ except ImportError as e:
 
 try:
     from backend.backtester import run_backtest
-    print("[app] Backtester modülü yüklendi OK")
+    print("[app] Backtester module loaded OK")
 except ImportError as e:
-    print(f"[app] Backtester import hatası: {e}")
+    print(f"[app] Backtester import error: {e}")
     def run_backtest(*a, **kw): return None
 
-# Geçerli ticker ve feature group listeleri (input validation için)
+# Valid ticker and feature group lists for input validation
 VALID_TICKERS       = set(TICKERS_TO_TRAIN)
 VALID_FEATURE_GROUPS = set(FEATURE_GROUPS.keys()) if FEATURE_GROUPS else {
     "Returns","RSI","MACD","Bollinger","SMA","EMA","Volatility",
@@ -64,12 +64,12 @@ app = Flask(__name__,
             template_folder=os.path.join(BASE_DIR, "frontend", "templates"),
             static_folder=os.path.join(BASE_DIR, "frontend", "static"))
 
-# SECRET_KEY: env var yoksa güvenli rastgele üret (her yeniden başlatmada session geçersiz olur)
+# SECRET_KEY: generate safe random key if env var doesn't exist (invalidates sessions on restart)
 _secret = os.environ.get("SECRET_KEY")
 if not _secret:
     _secret = secrets.token_hex(32)
-    print("[app] UYARI: SECRET_KEY env var eksik! Render > Environment'a ekle. "
-          "Geçici rastgele key üretildi (restart'ta session'lar sıfırlanır).")
+    print("[app] WARNING: SECRET_KEY env var missing! Add to Render > Environment. "
+          "Temporary random key generated (sessions reset on restart).")
 app.config["SECRET_KEY"] = _secret
 
 # ── DB ──────────────────────────────────────────────────────────────────────
@@ -79,19 +79,19 @@ if _db_url.startswith("postgres://"):
 
 if _db_url:
     app.config["SQLALCHEMY_DATABASE_URI"] = _db_url
-    print("[app] PostgreSQL kullanılıyor")
+    print("[app] Using PostgreSQL")
 else:
     _inst = os.path.join(BASE_DIR, "instance")
     os.makedirs(_inst, exist_ok=True)
     app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{_inst}/fintap.db"
-    print("[app] SQLite kullanılıyor (Render'da her deploy sıfırlanır!)")
+    print("[app] Using SQLite (Resets on every deploy in Render!)")
 
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
     "pool_pre_ping": True,
     "pool_recycle":  280,
 }
-app.config["WTF_CSRF_TIME_LIMIT"] = 3600   # CSRF token 1 saat geçerli
+app.config["WTF_CSRF_TIME_LIMIT"] = 3600   # CSRF token valid for 1 hour
 
 # ── Flask-Mail ────────────────────────────────────────────────────────────────
 app.config["MAIL_SERVER"]   = os.environ.get("MAIL_SERVER", "")
@@ -102,16 +102,16 @@ app.config["MAIL_PASSWORD"] = os.environ.get("MAIL_PASSWORD", "")
 app.config["MAIL_DEFAULT_SENDER"] = os.environ.get("MAIL_DEFAULT_SENDER", "noreply@fintap.app")
 mail = Mail(app)
 
-# ── Cookie güvenliği ────────────────────────────────────────────────────────
+# ── Cookie Security ────────────────────────────────────────────────────────
 _is_prod = not app.debug
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-app.config["SESSION_COOKIE_SECURE"]   = _is_prod   # HTTPS zorunlu prod'da
+app.config["SESSION_COOKIE_SECURE"]   = _is_prod   # HTTPS required in prod
 
 # ── CORS ──────────────────────────────────────────────────────────────────
 _allowed_origins = os.environ.get("ALLOWED_ORIGINS", "*")
 if _allowed_origins == "*":
-    print("[app] UYARI: CORS tüm origin'lere açık. Prod'da ALLOWED_ORIGINS env var'ını ayarla.")
+    print("[app] WARNING: CORS is open to all origins. Set ALLOWED_ORIGINS env var in prod.")
 CORS(app, origins=_allowed_origins)
 
 # ── Extensions ────────────────────────────────────────────────────────────
@@ -132,37 +132,37 @@ login_manager.login_view = "login"
 def load_user(uid):
     return db.session.get(User, int(uid))
 
-# DB tablolarını oluştur
+# Create DB tables
 with app.app_context():
     try:
         db.create_all()
-        print("[app] DB tabloları hazır OK")
+        print("[app] DB tables ready OK")
     except Exception as e:
-        print(f"[app] db.create_all hatası: {e}")
+        print(f"[app] db.create_all error: {e}")
 
-    # V0.7 migrasyon: prediction tablosuna accuracy_pct kolonu ekle (yoksa)
+    # V0.7 migration: add accuracy_pct column to prediction table if not exists
     try:
         db.session.execute(db.text("ALTER TABLE prediction ADD COLUMN accuracy_pct FLOAT"))
         db.session.commit()
-        print("[app] Migrasyon: prediction.accuracy_pct kolonu eklendi OK")
+        print("[app] Migration: prediction.accuracy_pct column added OK")
     except Exception:
         db.session.rollback()
-        # Kolon zaten mevcut, sorun yok
+        # Column already exists, no issue
 
 
-# ── CSRF token'ı her response'a ekle (JS fetch için) ──────────────────────
+# ── Inject CSRF token to every response (for JS fetch) ──────────────────────
 @app.after_request
 def inject_csrf_token(response):
     response.set_cookie(
         "csrf_token", generate_csrf(),
-        httponly=False,          # JS okunabilir olmalı
+        httponly=False,          # Must be readable by JS
         samesite="Strict",
         secure=_is_prod,
     )
     return response
 
 
-# ── Güvenlik başlıkları ───────────────────────────────────────────────────
+# ── Security Headers ───────────────────────────────────────────────────
 @app.after_request
 def set_security_headers(response):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
@@ -176,7 +176,7 @@ def set_security_headers(response):
     return response
 
 
-# ── Yardımcı ───────────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────
 def get_wallet():
     w = Wallet.query.filter_by(user_id=current_user.id).first()
     if not w:
@@ -186,18 +186,16 @@ def get_wallet():
 
 
 def _admin_check() -> bool:
-
     admin_secret = os.environ.get("ADMIN_SECRET", "")
     if not admin_secret:
-        return False   # Hiç env var yoksa reddet — asla dev mode'da açma
-    # Header öncelikli; URL query param de desteklenir (CLI kolaylığı için)
+        return False   # Deny if no env var - never open in dev mode
+    # Header priority; URL query param is also supported for CLI ease
     provided = (request.headers.get("X-Admin-Secret", "")
                 or request.args.get("secret", ""))
     return secrets.compare_digest(provided, admin_secret)
 
 
 def _is_admin() -> bool:
-
     if not current_user.is_authenticated:
         return False
     admin_emails_raw = os.environ.get("ADMIN_EMAIL", "")
@@ -213,7 +211,7 @@ def _is_admin() -> bool:
 
 
 def _is_safe_redirect_url(url: str) -> bool:
-    """Open redirect koruması: URL aynı host'a mı işaret ediyor?"""
+    """Open redirect protection: does the URL point to the same host?"""
     if not url:
         return False
     try:
@@ -225,16 +223,16 @@ def _is_safe_redirect_url(url: str) -> bool:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-#  SAYFALAR
+#  PAGES
 # ══════════════════════════════════════════════════════════════════════════
 
 @app.route("/ping")
 def ping():
-    """UptimeRobot bu endpoint'i her 5 dakika ping atar → Render uyumaz."""
+    """UptimeRobot pings this endpoint every 5 minutes → prevents Render sleep."""
     return "OK", 200
 
 
-# ── Cache & veri güncelleme endpoint'leri ─────────────────────────────────────
+# ── Cache & Data update endpoints ─────────────────────────────────────
 
 @app.route("/api/cache/status")
 @login_required
@@ -257,22 +255,21 @@ def api_cache_status():
 @limiter.limit("10 per hour")
 def api_cache_clear():
     if not _is_admin():
-        return jsonify({"error": "Yetkisiz erişim"}), 403
+        return jsonify({"error": "Unauthorized access"}), 403
     ticker = request.args.get("ticker")
     if ticker and ticker not in VALID_TICKERS:
-        return jsonify({"error": "Geçersiz ticker"}), 400
+        return jsonify({"error": "Invalid ticker"}), 400
     try:
         from backend.data_manager import cache_clear
         cache_clear(ticker)
         return jsonify({"status": "ok", "cleared": ticker or "all"})
     except Exception as e:
-        return jsonify({"error": "İşlem başarısız"}), 500
+        return jsonify({"error": "Operation failed"}), 500
 
 
 @app.route("/api/refresh")
 @limiter.limit("5 per hour")
 def api_refresh():
-
     secret   = request.args.get("secret", "")
     expected = os.environ.get("CRON_SECRET", "")
 
@@ -290,19 +287,19 @@ def api_refresh():
                 df = get_processed_data(ticker, force_refresh=True)
                 if df is not None:
                     results["refreshed"].append(ticker)
-                    print(f"[refresh] {ticker}: OK, son: {df.index[-1].date()}")
+                    print(f"[refresh] {ticker}: OK, last: {df.index[-1].date()}")
                 else:
                     results["failed"].append(ticker)
             except Exception as e:
-                print(f"[refresh] {ticker}: HATA: {e}")
+                print(f"[refresh] {ticker}: ERROR: {e}")
                 results["failed"].append(ticker)
 
         results["skipped"] = TICKERS_TO_TRAIN[10:]
-        print(f"[refresh] Tamamlandı: {len(results['refreshed'])} OK, "
-              f"{len(results['failed'])} başarısız")
+        print(f"[refresh] Completed: {len(results['refreshed'])} OK, "
+              f"{len(results['failed'])} failed")
 
     except Exception as e:
-        print(f"[refresh] HATA: {e}"); traceback.print_exc()
+        print(f"[refresh] ERROR: {e}"); traceback.print_exc()
         results["error"] = str(e)
 
     return jsonify(results)
@@ -328,7 +325,7 @@ def _market_open_check():
 @app.route("/db-test")
 def db_test():
     if not _admin_check():
-        return jsonify({"error": "Yetkisiz erişim"}), 403
+        return jsonify({"error": "Unauthorized access"}), 403
 
     info = {
         "db_url_set":    bool(os.environ.get("DATABASE_URL")),
@@ -340,14 +337,14 @@ def db_test():
         info["connection"] = "OK ✓"
         info["tables"]     = db_inspect(db.engine).get_table_names()
     except Exception as e:
-        info["connection"] = f"HATA: {str(e)[:200]}"
+        info["connection"] = f"ERROR: {str(e)[:200]}"
     return jsonify(info), 200
 
 
 @app.route("/db-kur")
 def db_kur():
     if not _admin_check():
-        return jsonify({"error": "Yetkisiz erişim"}), 403
+        return jsonify({"error": "Unauthorized access"}), 403
 
     try:
         with app.app_context():
@@ -361,25 +358,25 @@ def db_kur():
                         "ALTER COLUMN password TYPE VARCHAR(512)"
                     ))
                     db.session.commit()
-                    print("[db-kur] password kolonu 512'ye genişletildi")
+                    print("[db-kur] password column extended to 512")
                 except Exception as alter_e:
                     db.session.rollback()
-                    print(f"[db-kur] ALTER zaten yapılmış veya hata: {alter_e}")
+                    print(f"[db-kur] ALTER already done or error: {alter_e}")
 
-            # V0.7 migrasyon: accuracy_pct kolonu (PostgreSQL ve SQLite için)
+            # V0.7 migration: accuracy_pct column (for PostgreSQL and SQLite)
             try:
                 db.session.execute(db.text(
                     "ALTER TABLE prediction ADD COLUMN accuracy_pct FLOAT"
                 ))
                 db.session.commit()
-                print("[db-kur] prediction.accuracy_pct kolonu eklendi")
+                print("[db-kur] prediction.accuracy_pct column added")
             except Exception as alter_e:
                 db.session.rollback()
-                print(f"[db-kur] accuracy_pct zaten mevcut veya hata: {alter_e}")
+                print(f"[db-kur] accuracy_pct already exists or error: {alter_e}")
 
-        return "Veritabanı kuruldu ve güncellendi ✓", 200
+        return "Database setup and updated ✓", 200
     except Exception as e:
-        return f"Hata: {e}", 500
+        return f"Error: {e}", 500
 
 
 @app.route("/")
@@ -493,7 +490,7 @@ def admin_panel():
             cache_info = {}
     except Exception as e:
         traceback.print_exc()
-        return f"<pre>Admin panel hatası: {e}</pre>", 500
+        return f"<pre>Admin panel error: {e}</pre>", 500
 
     return render_template("admin.html",
         user_count=user_count, pred_count=pred_count,
@@ -532,13 +529,13 @@ def api_market_summary():
 @limiter.limit("60 per minute")
 @csrf.exempt
 def api_history(ticker):
-    # Ticker whitelist kontrolü
+    # Ticker whitelist check
     if ticker not in VALID_TICKERS:
-        return jsonify({"error": "Geçersiz ticker"}), 400
+        return jsonify({"error": "Invalid ticker"}), 400
     try:
         df = get_processed_data(ticker)
         if df is None or df.empty:
-            return jsonify({"error": "Veri alınamadı"}), 404
+            return jsonify({"error": "Data could not be retrieved"}), 404
         r = df.tail(100)
         return jsonify({
             "dates":  [d.strftime("%Y-%m-%d") for d in r.index],
@@ -558,13 +555,13 @@ def api_compare():
     t2 = request.args.get("ticker2", "").upper()
 
     if not t1 or not t2:
-        return jsonify({"error": "Eksik parametre"}), 400
+        return jsonify({"error": "Missing parameter"}), 400
     if t1 not in VALID_TICKERS or t2 not in VALID_TICKERS:
-        return jsonify({"error": "Geçersiz ticker"}), 400
+        return jsonify({"error": "Invalid ticker"}), 400
 
     w = get_wallet()
     if w.balance <= 0:
-        return jsonify({"error": "Yetersiz bakiye"}), 402
+        return jsonify({"error": "Insufficient balance"}), 402
 
     try:
         m1 = get_suggestion_metrics(t1)
@@ -573,7 +570,7 @@ def api_compare():
         print(f"[api_compare]: {e}"); traceback.print_exc()
         return jsonify({"error": str(e)}), 500
     if not m1 or not m2:
-        return jsonify({"error": "Tahmin üretilemedi — LINEAR modeli deneyin"}), 500
+        return jsonify({"error": "Prediction failed — try the LINEAR model"}), 500
 
     w.balance -= 1
     w.last_updated = __import__("datetime").datetime.utcnow()
@@ -581,7 +578,7 @@ def api_compare():
         db.session.commit()
     except Exception as e:
         db.session.rollback()
-        print(f"[api_compare] DB kayıt hatası: {e}")
+        print(f"[api_compare] DB record error: {e}")
 
     return jsonify({
         "balance": w.balance,
@@ -626,11 +623,11 @@ try:
     _stripe_lib.api_key = _stripe_key
     _stripe_ok = bool(_stripe_key)
     stripe = _stripe_lib
-    print(f"[app] Stripe {'aktif' if _stripe_ok else 'STRIPE_SECRET_KEY eksik — test/prod için env ayarla'}")
+    print(f"[app] Stripe {'active' if _stripe_ok else 'STRIPE_SECRET_KEY missing — set env var for test/prod'}")
 except ImportError:
     stripe = None
     _stripe_ok = False
-    print("[app] stripe paketi yüklü değil — 'pip install stripe' çalıştır")
+    print("[app] stripe package not installed — run 'pip install stripe'")
 
 
 @app.route("/api/predict_run", methods=["POST"])
@@ -646,20 +643,20 @@ def api_predict_run():
 
     # Input validation
     if ticker not in VALID_TICKERS:
-        return jsonify({"error": f"Geçersiz ticker: {ticker}"}), 400
+        return jsonify({"error": f"Invalid ticker: {ticker}"}), 400
     if model not in VALID_MODELS:
-        return jsonify({"error": f"Geçersiz model: {model}"}), 400
+        return jsonify({"error": f"Invalid model: {model}"}), 400
     if not isinstance(features, list):
-        return jsonify({"error": "features bir liste olmalı"}), 400
+        return jsonify({"error": "features must be a list"}), 400
     invalid_feats = [f for f in features if f not in VALID_FEATURE_GROUPS]
     if invalid_feats:
-        return jsonify({"error": f"Geçersiz feature group(lar): {invalid_feats}"}), 400
+        return jsonify({"error": f"Invalid feature group(s): {invalid_feats}"}), 400
     if horizon not in {7, 14, 30, 90}:
-        return jsonify({"error": "Geçersiz horizon. 7, 14, 30 veya 90 olmalı."}), 400
+        return jsonify({"error": "Invalid horizon. Must be 7, 14, 30, or 90."}), 400
 
     w = get_wallet()
     if w.balance <= 0:
-        return jsonify({"error": "Yetersiz bakiye"}), 402
+        return jsonify({"error": "Insufficient balance"}), 402
 
     print(f"[predict_run] {ticker} | {model} | {len(features)} feature | {horizon}d")
 
@@ -667,14 +664,14 @@ def api_predict_run():
         preds, chart_data = train_and_predict_dynamic(ticker, model, features, horizon)
     except Exception as e:
         print(f"[predict_run] EXCEPTION: {e}"); traceback.print_exc()
-        return jsonify({"error": f"Model istisnası: {str(e)[:300]}"}), 500
+        return jsonify({"error": f"Model exception: {str(e)[:300]}"}), 500
 
     if not preds:
         return jsonify({
             "error": (
-                "Tahmin başarısız. "
-                "Öneri: LINEAR modeli ve az feature seçin, "
-                "veya farklı bir hisse deneyin."
+                "Prediction failed. "
+                "Suggestion: Choose the LINEAR model and fewer features, "
+                "or try a different stock."
             )
         }), 500
 
@@ -688,7 +685,7 @@ def api_predict_run():
         db.session.commit()
     except Exception as e:
         db.session.rollback()
-        print(f"[predict_run] DB kayıt hatası: {e}")
+        print(f"[predict_run] DB record error: {e}")
 
     return jsonify({
         "status":     "success",
@@ -705,9 +702,9 @@ def api_predict_run():
 @limiter.limit("30 per minute")
 @csrf.exempt
 def api_sentiment(ticker):
-    """Yahoo Finance RSS + VADER sentiment analizi."""
+    """Yahoo Finance RSS + VADER sentiment analysis."""
     if ticker not in VALID_TICKERS:
-        return jsonify({"error": "Geçersiz ticker"}), 400
+        return jsonify({"error": "Invalid ticker"}), 400
     try:
         import feedparser
         from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
@@ -875,11 +872,11 @@ def api_ai_analyst():
     horizon = int(payload.get("horizon", 14) or 14)
 
     if ticker not in VALID_TICKERS:
-        return jsonify({"error": "Gecersiz ticker"}), 400
+        return jsonify({"error": "Invalid ticker"}), 400
 
     snap = _technical_snapshot(ticker)
     if not snap:
-        return jsonify({"error": "Analiz verisi hazir degil"}), 422
+        return jsonify({"error": "Analysis data is not ready"}), 422
 
     expected_return = None
     if prediction and snap["price"]:
@@ -1058,48 +1055,48 @@ def api_ai_chat():
     text = message.lower()
     quick_links = []
 
-    if any(k in text for k in ("backtest", "short", "açığa", "aciga", "strateji")):
+    if any(k in text for k in ("backtest", "short", "açığa", "aciga", "strategy", "strateji")):
         answer = (
-            "Backtest, seçtiğin hisse üzerinde RSI + SMA trend stratejisini geçmiş veride dener. "
-            "Allow Short Selling açıksa düşüş sinyallerinde short işlem de simüle edilir. "
-            "Sonuçlarda strategy return, buy-and-hold, win rate, max drawdown ve Sharpe ratio değerlerine bakmalısın."
+            "Backtest tests the RSI + SMA trend strategy on your chosen stock using historical data. "
+            "If 'Allow Short Selling' is enabled, short transactions are also simulated on downtrend signals. "
+            "In the results, you should look at strategy return, buy-and-hold, win rate, max drawdown, and Sharpe ratio values."
         )
         quick_links = [{"label": "Open Backtester", "url": "/backtest"}]
     elif any(k in text for k in ("tahmin", "forecast", "predict", "prediction", "model")):
         answer = (
-            "AI Forecast sayfasında ticker, model, horizon ve teknik göstergeleri seçip fiyat tahmini alabilirsin. "
-            "Kısa vadede 7 veya 14 gün daha dengeli olur; 90 gün daha belirsizdir. "
-            "Tahmin sonrası AI Analyst Summary risk, güven ve beklenen getiri yorumunu verir."
+            "On the AI Forecast page, you can choose the ticker, model, horizon, and technical indicators to get a price prediction. "
+            "In the short term, 7 or 14 days are more balanced; 90 days is highly uncertain. "
+            "After the prediction, the AI Analyst Summary provides commentaries on risk, confidence, and expected return."
         )
         quick_links = [{"label": "Open AI Forecast", "url": "/predict"}]
-    elif any(k in text for k in ("portfolio", "watchlist", "portföy", "portfoy", "takip")):
+    elif any(k in text for k in ("portfolio", "watchlist", "portföy", "portfoy", "takip", "track")):
         answer = (
-            "Portfolio sayfasında watchlist enstrümanlarını takip edebilirsin. "
-            "AI Portfolio Insight kartı listedeki en güçlü skoru, en riskli varlığı ve takip aksiyonlarını özetler."
+            "You can track your watchlist instruments on the Portfolio page. "
+            "The AI Portfolio Insight card summarizes the strongest blended score, the riskiest asset, and tracking actions in your list."
         )
         quick_links = [{"label": "Open Portfolio", "url": "/portfolio"}]
-    elif any(k in text for k in ("screener", "hisse bul", "listele", "öner", "oner")):
+    elif any(k in text for k in ("screener", "hisse bul", "listele", "öner", "oner", "recommend", "find")):
         answer = (
-            "All Stocks sayfasındaki AI Stock Screener, enstrümanları Balanced, Low Risk veya Momentum profiline göre sıralar. "
-            "Skor; trend, RSI, son hareket ve volatilite birleşiminden hesaplanır."
+            "The AI Stock Screener on the All Stocks page ranks instruments according to Balanced, Low Risk, or Momentum profiles. "
+            "The score is calculated based on a combination of trend, RSI, recent movement, and volatility."
         )
         quick_links = [{"label": "Open Screener", "url": "/all_stocks"}]
-    elif any(k in text for k in ("token", "bakiye", "ödeme", "odeme", "pricing", "price")):
+    elif any(k in text for k in ("token", "bakiye", "ödeme", "odeme", "pricing", "price", "balance", "pay")):
         answer = (
-            "Prediction çalıştırmak token harcar. Sağ üstte mevcut token bakiyeni görebilirsin. "
-            "Token azaldığında Pricing sayfasından paket veya abonelik alabilirsin."
+            "Running a prediction consumes tokens. You can see your current token balance at the top right. "
+            "When your tokens are running low, you can buy packs or subscriptions from the Pricing page."
         )
         quick_links = [{"label": "Open Pricing", "url": "/prices"}]
-    elif any(k in text for k in ("risk", "rsi", "drawdown", "sharpe", "volatil")):
+    elif any(k in text for k in ("risk", "rsi", "drawdown", "sharpe", "volatil", "volatile")):
         answer = (
-            "Risk okurken RSI tek başına yeterli değildir. RSI, trend, volatilite, max drawdown ve Sharpe ratio birlikte yorumlanmalı. "
-            "Drawdown büyüdükçe sermaye riski artar; Sharpe 1 üzerindeyse risk-ayarlı performans daha sağlıklı kabul edilir."
+            "RSI alone is not enough to read risk properly. RSI, trend, volatility, max drawdown, and Sharpe ratio should be interpreted together. "
+            "As drawdown grows, capital risk increases; if the Sharpe ratio is above 1, risk-adjusted performance is considered healthier."
         )
     else:
-        page_hint = f" Şu an /{page} sayfasındasın; buradaki araçla ilgili daha spesifik soru sorabilirsin." if page else ""
+        page_hint = f" You are currently on the /{page} page; you can ask a more specific question about the tool here." if page else ""
         answer = (
-            "Ben Fin-TAP asistanıyım. Forecast, backtest, portfolio, screener, tokenlar ve risk metrikleri hakkında yardımcı olabilirim."
-            f"{page_hint} Örnek: 'Backtest sonuçlarını nasıl yorumlarım?' veya 'Allow short selling ne işe yarar?'"
+            "I am the Fin-TAP assistant. I can help you with forecast, backtest, portfolio, screener, tokens, and risk metrics."
+            f"{page_hint} Example: 'How do I interpret backtest results?' or 'What does allow short selling do?'"
         )
 
     return jsonify({
@@ -1115,14 +1112,14 @@ def api_ai_chat():
 @csrf.exempt
 def api_ohlc(ticker):
     if ticker not in VALID_TICKERS:
-        return jsonify({"error": "Geçersiz ticker"}), 400
+        return jsonify({"error": "Invalid ticker"}), 400
 
     try:
         import numpy as np
 
         df = get_processed_data(ticker)
         if df is None or df.empty:
-            return jsonify({"error": "Veri yok"}), 422
+            return jsonify({"error": "No data"}), 422
 
         df = df.tail(120).copy()
         df = df.dropna(subset=["Open", "High", "Low", "Close"])
@@ -1241,9 +1238,9 @@ def api_watchlist_add():
     symbol  = str(payload.get("symbol", "")).upper().strip()
 
     if not symbol:
-        return jsonify({"error": "symbol gerekli"}), 400
+        return jsonify({"error": "symbol is required"}), 400
     if symbol not in VALID_TICKERS:
-        return jsonify({"error": "Geçersiz ticker"}), 400
+        return jsonify({"error": "Invalid ticker"}), 400
 
     existing = Watchlist.query.filter_by(
         user_id=current_user.id, symbol=symbol
@@ -1253,7 +1250,7 @@ def api_watchlist_add():
 
     wl_count = Watchlist.query.filter_by(user_id=current_user.id).count()
     if wl_count >= 30:
-        return jsonify({"error": "Takip listesi en fazla 30 enstrüman içerebilir."}), 400
+        return jsonify({"error": "The watchlist can contain a maximum of 30 instruments."}), 400
 
     item = Watchlist(user_id=current_user.id, symbol=symbol)
     db.session.add(item)
@@ -1271,13 +1268,13 @@ def api_watchlist_add():
 @limiter.limit("30 per hour")
 @csrf.exempt
 def api_watchlist_remove(symbol):
-    """Takip listesinden hisse çıkar."""
+    """Remove a stock from the watchlist."""
     symbol = symbol.upper().strip()
     item   = Watchlist.query.filter_by(
         user_id=current_user.id, symbol=symbol
     ).first()
     if not item:
-        return jsonify({"error": "Bulunamadı"}), 404
+        return jsonify({"error": "Not found"}), 404
     db.session.delete(item)
     try:
         db.session.commit()
@@ -1338,21 +1335,21 @@ def api_alerts_create():
     note         = str(payload.get("note", ""))[:200].strip()
 
     if symbol not in VALID_TICKERS:
-        return jsonify({"error": "Geçersiz ticker."}), 400
+        return jsonify({"error": "Invalid ticker."}), 400
     if direction not in ("above", "below"):
-        return jsonify({"error": "direction 'above' veya 'below' olmalı."}), 400
+        return jsonify({"error": "direction must be 'above' or 'below'."}), 400
     try:
         target_price = float(target_price)
         if target_price <= 0:
             raise ValueError
     except (TypeError, ValueError):
-        return jsonify({"error": "Geçersiz hedef fiyat."}), 400
+        return jsonify({"error": "Invalid target price."}), 400
 
     active_count = PriceAlert.query.filter_by(
         user_id=current_user.id, status="active"
     ).count()
     if active_count >= MAX_ALERTS_PER_USER:
-        return jsonify({"error": f"En fazla {MAX_ALERTS_PER_USER} aktif alarm oluşturabilirsiniz."}), 400
+        return jsonify({"error": f"You can create a maximum of {MAX_ALERTS_PER_USER} active alerts."}), 400
 
     alert = PriceAlert(
         user_id=current_user.id,
@@ -1408,7 +1405,7 @@ def api_alerts_check():
     if not active_alerts:
         return jsonify({"checked": 0, "triggered": 0})
 
-    # Fiyatları sembol bazında bir kez çek
+    # Fetch prices by symbol once
     price_cache: dict[str, float] = {}
     for alert in active_alerts:
         if alert.symbol not in price_cache:
@@ -1432,12 +1429,12 @@ def api_alerts_check():
         if not fired:
             continue
 
-        # Tetiklendi — status güncelle
+        # Triggered — update status
         alert.status       = "triggered"
         alert.triggered_at = _dt.utcnow()
         triggered_count   += 1
 
-        # Email gönder
+        # Send email
         try:
             user = db.session.get(User, alert.user_id)
             if user and app.config.get("MAIL_SERVER"):
@@ -1458,14 +1455,14 @@ def api_alerts_check():
                 )
                 msg = Message(subject=subject, recipients=[user.email], body=body)
                 mail.send(msg)
-                print(f"[alerts] Email gönderildi → {user.email} ({alert.symbol})")
+                print(f"[alerts] Email sent → {user.email} ({alert.symbol})")
             else:
-                print(f"[alerts] MAIL_SERVER yok — alarm tetiklendi ama email gönderilmedi: {alert.symbol}")
+                print(f"[alerts] MAIL_SERVER missing — alert triggered but email not sent: {alert.symbol}")
         except Exception as e:
-            print(f"[alerts] Email hatası: {e}")
+            print(f"[alerts] Email error: {e}")
 
     db.session.commit()
-    print(f"[alerts] Check tamamlandı: {len(active_alerts)} kontrol, {triggered_count} tetiklendi")
+    print(f"[alerts] Check complete: {len(active_alerts)} checked, {triggered_count} triggered")
     return jsonify({"checked": len(active_alerts), "triggered": triggered_count})
 
 
@@ -1549,38 +1546,38 @@ def api_paper_portfolio():
 @limiter.limit("30 per minute")
 @csrf.exempt
 def api_paper_trade():
-    """Sanal alım/satım işlemi."""
+    """Simulated buy/sell transaction."""
     payload  = request.get_json(silent=True) or {}
     symbol   = str(payload.get("symbol", "")).upper().strip()
     action   = str(payload.get("action", "")).lower().strip()
     quantity = payload.get("quantity")
 
     if symbol not in VALID_TICKERS:
-        return jsonify({"error": "Geçersiz ticker."}), 400
+        return jsonify({"error": "Invalid ticker."}), 400
     if action not in ("buy", "sell"):
-        return jsonify({"error": "action 'buy' veya 'sell' olmalı."}), 400
+        return jsonify({"error": "action must be 'buy' or 'sell'."}), 400
     try:
         quantity = float(quantity)
         if quantity <= 0:
             raise ValueError
     except (TypeError, ValueError):
-        return jsonify({"error": "Geçersiz miktar."}), 400
+        return jsonify({"error": "Invalid quantity."}), 400
 
-    # Güncel fiyatı çek
+    # Get current price
     try:
         df = get_processed_data(symbol)
         if df is None or df.empty:
-            return jsonify({"error": "Fiyat verisi alınamadı."}), 422
+            return jsonify({"error": "Price data could not be retrieved."}), 422
         cur_price = float(df["Close"].iloc[-1])
     except Exception:
-        return jsonify({"error": "Fiyat verisi alınamadı."}), 422
+        return jsonify({"error": "Price data could not be retrieved."}), 422
 
     total_cost = round(quantity * cur_price, 6)
     port = _get_or_create_paper(current_user.id)
 
     if action == "buy":
         if port.cash < total_cost:
-            return jsonify({"error": f"Yetersiz bakiye. Mevcut: ${port.cash:,.2f}, Gerekli: ${total_cost:,.2f}"}), 400
+            return jsonify({"error": f"Insufficient balance. Available: ${port.cash:,.2f}, Required: ${total_cost:,.2f}"}), 400
 
         port.cash = round(port.cash - total_cost, 6)
 
@@ -1588,7 +1585,7 @@ def api_paper_trade():
             user_id=current_user.id, symbol=symbol
         ).first()
         if pos:
-            # Ortalama maliyet güncelle
+            # Update average cost
             new_qty  = pos.quantity + quantity
             pos.avg_cost = round((pos.avg_cost * pos.quantity + cur_price * quantity) / new_qty, 6)
             pos.quantity = round(new_qty, 6)
@@ -1605,7 +1602,7 @@ def api_paper_trade():
         ).first()
         if not pos or pos.quantity < quantity:
             held = round(pos.quantity, 4) if pos else 0
-            return jsonify({"error": f"Yetersiz pozisyon. Elinizde: {held} {symbol}"}), 400
+            return jsonify({"error": f"Insufficient positions. You hold: {held} {symbol}"}), 400
 
         port.cash    = round(port.cash + total_cost, 6)
         pos.quantity = round(pos.quantity - quantity, 6)
@@ -1636,7 +1633,7 @@ def api_paper_trade():
 @limiter.limit("30 per minute")
 @csrf.exempt
 def api_paper_history():
-    """Son 50 işlem geçmişi."""
+    """Last 50 transaction history."""
     trades = (PaperTrade.query
               .filter_by(user_id=current_user.id)
               .order_by(PaperTrade.executed_at.desc())
@@ -1657,7 +1654,7 @@ def api_paper_history():
 @limiter.limit("3 per hour")
 @csrf.exempt
 def api_paper_reset():
-    """Sanal portföyü sıfırla — tüm pozisyonları ve geçmişi temizle."""
+    """Reset virtual portfolio — clear all positions and history."""
     port = _get_or_create_paper(current_user.id)
 
     PaperPosition.query.filter_by(user_id=current_user.id).delete()
@@ -1688,9 +1685,9 @@ def correlation_page():
 @csrf.exempt
 def api_correlation():
     """
-    Seçilen ticker'lar için günlük log-return korelasyon matrisini döndür.
+    Returns the daily log-return correlation matrix for selected tickers.
     Query params:
-      tickers : virgülle ayrılmış semboller (max 20)
+      tickers : comma-separated symbols (max 20)
       days    : lookback (30 | 90 | 180 | 365)
     """
     import numpy as np
@@ -1705,9 +1702,9 @@ def api_correlation():
     tickers = [t for t in tickers if t in VALID_TICKERS][:20]
 
     if len(tickers) < 2:
-        return jsonify({"error": "En az 2 geçerli ticker seçin."}), 400
+        return jsonify({"error": "Select at least 2 valid tickers."}), 400
 
-    # ── Her ticker için günlük log-return serisi çek ─────────────────────
+    # ── Fetch daily log-return series for each ticker ─────────────────────
     returns_map: dict[str, np.ndarray] = {}
     for ticker in tickers:
         try:
@@ -1724,16 +1721,16 @@ def api_correlation():
 
     valid = list(returns_map.keys())
     if len(valid) < 2:
-        return jsonify({"error": "Yeterli veri bulunamadı."}), 422
+        return jsonify({"error": "Insufficient data found."}), 422
 
-    # Ortak uzunluğa kırp (en kısa seriyi baz al)
+    # Trim to common length (based on shortest series)
     min_len = min(len(v) for v in returns_map.values())
     matrix_data = np.array([returns_map[t][-min_len:] for t in valid])  # shape: (n_tickers, min_len)
 
-    # Pearson korelasyon matrisi
+    # Pearson correlation matrix
     corr = np.corrcoef(matrix_data)
 
-    # ── Özet istatistikler (en yüksek / en düşük korelasyon çifti) ──────
+    # ── Summary statistics (highest / lowest correlation pairs) ──────
     pairs = []
     n = len(valid)
     for i in range(n):
@@ -1748,8 +1745,8 @@ def api_correlation():
         "tickers":  valid,
         "matrix":   [[round(float(corr[i][j]), 4) for j in range(n)] for i in range(n)],
         "days":     min_len,
-        "top_pos":  pairs[:3],           # en güçlü pozitif korelasyon
-        "top_neg":  pairs[-3:][::-1],    # en güçlü negatif korelasyon
+        "top_pos":  pairs[:3],           # strongest positive correlation
+        "top_neg":  pairs[-3:][::-1],    # strongest negative correlation
     })
 
 
@@ -1812,13 +1809,13 @@ def api_accuracy_update():
 @csrf.exempt
 def api_create_checkout():
     if not _stripe_ok:
-        return jsonify({"error": "Ödeme sistemi henüz aktif değil. STRIPE_SECRET_KEY env var'ı ayarlanmamış."}), 503
+        return jsonify({"error": "Payment system is not active yet. STRIPE_SECRET_KEY env var is not set."}), 503
 
     payload = request.get_json(silent=True) or {}
     pack_id = str(payload.get("pack", "")).lower().strip()
 
     if pack_id not in TOKEN_PACKS:
-        return jsonify({"error": "Geçersiz paket"}), 400
+        return jsonify({"error": "Invalid pack"}), 400
 
     pack       = TOKEN_PACKS[pack_id]
     base_url   = request.host_url.rstrip("/")
@@ -1848,12 +1845,12 @@ def api_create_checkout():
                 "tokens":  str(pack["tokens"]),
             },
         )
-        print(f"[stripe] checkout session oluşturuldu: user={current_user.id} pack={pack_id}")
+        print(f"[stripe] checkout session created: user={current_user.id} pack={pack_id}")
         return jsonify({"url": session.url})
     except Exception as e:
-        print(f"[stripe] checkout session hatası: {e}")
+        print(f"[stripe] checkout session error: {e}")
         traceback.print_exc()
-        return jsonify({"error": "Ödeme başlatılamadı. Lütfen tekrar deneyin."}), 500
+        return jsonify({"error": "Payment could not be initiated. Please try again."}), 500
 
 
 @app.route("/api/payment/create-subscription", methods=["POST"])
@@ -1861,15 +1858,15 @@ def api_create_checkout():
 @limiter.limit("10 per hour")
 @csrf.exempt
 def api_create_subscription():
-    """Stripe Subscription Checkout oturumu oluştur (aylık abonelik)."""
+    """Create Stripe Subscription Checkout session (monthly subscription)."""
     if not _stripe_ok:
-        return jsonify({"error": "Ödeme sistemi henüz aktif değil. STRIPE_SECRET_KEY env var'ı ayarlanmamış."}), 503
+        return jsonify({"error": "Payment system is not active yet. STRIPE_SECRET_KEY env var is not set."}), 503
 
     payload = request.get_json(silent=True) or {}
     plan_id = payload.get("plan", "")
 
     if plan_id not in SUBSCRIPTION_PLANS:
-        return jsonify({"error": "Geçersiz abonelik planı."}), 400
+        return jsonify({"error": "Invalid subscription plan."}), 400
 
     plan     = SUBSCRIPTION_PLANS[plan_id]
     base_url = request.host_url.rstrip("/")
@@ -1897,20 +1894,20 @@ def api_create_subscription():
                 "tokens":  str(plan["tokens"]),
             },
         )
-        print(f"[stripe] subscription session oluşturuldu: user={current_user.id} plan={plan_id}")
+        print(f"[stripe] subscription session created: user={current_user.id} plan={plan_id}")
         return jsonify({"url": session.url})
     except Exception as e:
-        print(f"[stripe] subscription session hatası: {e}")
+        print(f"[stripe] subscription session error: {e}")
         traceback.print_exc()
-        return jsonify({"error": "Abonelik başlatılamadı. Lütfen tekrar deneyin."}), 500
+        return jsonify({"error": "Subscription could not be initiated. Please try again."}), 500
 
 
 @app.route("/api/payment/webhook", methods=["POST"])
 @csrf.exempt
 def stripe_webhook():
     """
-    Stripe'ın çağırdığı webhook endpoint'i.
-    checkout.session.completed olayını dinler → token bakiyesini günceller.
+    Stripe webhook endpoint.
+    Listens to checkout.session.completed event → updates token balance.
     """
     if not _stripe_ok:
         return "", 400
@@ -1919,18 +1916,18 @@ def stripe_webhook():
     sig_header = request.headers.get("Stripe-Signature", "")
     wh_secret  = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 
-    # 1) İmza doğrulama / parse
+    # 1) Signature verification / parse
     try:
         if wh_secret:
             event = stripe.Webhook.construct_event(payload, sig_header, wh_secret)
         else:
-            print("[stripe webhook] UYARI: STRIPE_WEBHOOK_SECRET eksik, imza doğrulanmıyor!")
+            print("[stripe webhook] WARNING: STRIPE_WEBHOOK_SECRET missing, signature not verified!")
             event = json.loads(payload)
     except Exception as e:
-        print(f"[stripe webhook] imza/parse hatası: {e}")
+        print(f"[stripe webhook] signature/parse error: {e}")
         return jsonify({"error": str(e)}), 400
 
-    # 2) Ham payload'ı JSON olarak parse et — SDK typed object sorunlarını bypass eder
+    # 2) Parse raw payload as JSON — bypass SDK typed object problems
     try:
         raw_event  = json.loads(payload)
         event_type = raw_event.get("type", "")
@@ -1964,15 +1961,15 @@ def stripe_webhook():
 
                 db.session.add(Transaction(user_id=user_id, amount_paid=amount, tokens_added=tokens))
                 db.session.commit()
-                print(f"[stripe webhook] user={user_id} +{tokens} token eklendi OK (mode={mode})")
+                print(f"[stripe webhook] user={user_id} +{tokens} token added OK (mode={mode})")
             else:
-                print(f"[stripe webhook] UYARI: metadata boş — session={session_id} meta={meta}")
+                print(f"[stripe webhook] WARNING: metadata empty — session={session_id} meta={meta}")
 
         elif event_type == "invoice.payment_succeeded":
-            # Aylık yenileme — subscription renewal token yükleme
+            # Monthly renewal token loading
             invoice   = raw_event["data"]["object"]
             billing   = invoice.get("billing_reason", "")
-            # Sadece subscription_cycle (yenileme) olaylarını işle; ilk ödeme checkout.session.completed ile halledildi
+            # Process only subscription_cycle (renewal) events; initial payment is handled via checkout.session.completed
             if billing == "subscription_cycle":
                 sub_id = invoice.get("subscription", "")
                 try:
@@ -1988,13 +1985,13 @@ def stripe_webhook():
                             w.balance += tokens
                             db.session.add(Transaction(user_id=user_id, amount_paid=amount, tokens_added=tokens))
                             db.session.commit()
-                            print(f"[stripe webhook] yenileme: user={user_id} +{tokens} token (plan={plan_id})")
+                            print(f"[stripe webhook] renewal: user={user_id} +{tokens} token (plan={plan_id})")
                 except Exception as sub_err:
-                    print(f"[stripe webhook] subscription renewal hatası: {sub_err}")
+                    print(f"[stripe webhook] subscription renewal error: {sub_err}")
 
     except Exception as e:
         db.session.rollback()
-        print(f"[stripe webhook] HATA: {e}")
+        print(f"[stripe webhook] ERROR: {e}")
         traceback.print_exc()
         return jsonify({"error": str(e)[:200]}), 500
 
@@ -2010,18 +2007,16 @@ def payment_success():
                            session_id=request.args.get("session_id", ""))
 
 
-# ══════════════════════════════════════════════════════════════════════════
-#  AUTH
-# ══════════════════════════════════════════════════════════════════════════
+# ── AUTH ────────────────────────────────────────────────═══════════════════
 
 def _password_strong(pw: str) -> tuple[bool, str]:
-    """Şifre güvenlik kontrolü. (bool, hata_mesajı)"""
+    """Password strength validation. (bool, error_message)"""
     if len(pw) < 8:
-        return False, "Şifre en az 8 karakter olmalı."
+        return False, "Password must be at least 8 characters long."
     has_letter = any(c.isalpha() for c in pw)
     has_digit  = any(c.isdigit() for c in pw)
     if not has_letter or not has_digit:
-        return False, "Şifre en az 1 harf ve 1 rakam içermeli."
+        return False, "Password must contain at least 1 letter and 1 number."
     return True, ""
 
 
@@ -2036,14 +2031,14 @@ def register():
         password =  request.form.get("password") or ""
 
         if not email or not name or not password:
-            flash("Tüm alanları doldurun.", "error")
+            flash("Please fill in all fields.", "error")
             return redirect(url_for("register"))
 
         if len(email) > 254:
-            flash("Geçersiz e-posta adresi.", "error")
+            flash("Invalid email address.", "error")
             return redirect(url_for("register"))
         if len(name) > 100:
-            flash("İsim en fazla 100 karakter olabilir.", "error")
+            flash("Name can be a maximum of 100 characters.", "error")
             return redirect(url_for("register"))
 
         ok, msg = _password_strong(password)
@@ -2051,9 +2046,9 @@ def register():
             flash(msg, "error")
             return redirect(url_for("register"))
 
-        # Email enumeration'ı önle: aynı generic hata mesajını kullan
+        # Prevent email enumeration: use the same generic error message
         if User.query.filter_by(email=email).first():
-            flash("Kayıt tamamlanamadı. Lütfen farklı bir e-posta deneyin.", "error")
+            flash("Registration could not be completed. Please try a different email.", "error")
             return redirect(url_for("register"))
 
         try:
@@ -2065,13 +2060,13 @@ def register():
             db.session.add(wallet)
             db.session.commit()
             login_user(user)
-            print(f"[register] Yeni kullanıcı: {email}")
+            print(f"[register] New user: {email}")
             return redirect(url_for("root"))
         except Exception as e:
             db.session.rollback()
-            print(f"[register] HATA: {type(e).__name__}: {e}")
+            print(f"[register] ERROR: {type(e).__name__}: {e}")
             traceback.print_exc()
-            flash("Kayıt sırasında bir hata oluştu. Lütfen tekrar deneyin.", "error")
+            flash("An error occurred during registration. Please try again.", "error")
     return render_template("register.html")
 
 
@@ -2088,7 +2083,7 @@ def login():
             login_user(user)
             next_url = request.args.get("next", "")
             return redirect(next_url if _is_safe_redirect_url(next_url) else url_for("root"))
-        flash("Hatalı e-posta veya şifre.", "error")
+        flash("Incorrect email or password.", "error")
     return render_template("login.html")
 
 
@@ -2099,7 +2094,7 @@ def logout():
     return redirect(url_for("login"))
 
 
-# ── Şifre Sıfırlama ───────────────────────────────────────────────────────────
+# ── Password Reset ───────────────────────────────────────────────────────────
 
 def _reset_serializer():
     return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="pw-reset-v1")
@@ -2110,28 +2105,27 @@ def _send_reset_email(user, reset_url: str):
         return False
     try:
         msg = Message(
-            subject="Fin-TAP — Şifre Sıfırlama",
+            subject="Fin-TAP — Password Reset",
             recipients=[user.email],
         )
         msg.body = (
-            f"Merhaba {user.name},\n\n"
-            f"Fin-TAP hesabınız için şifre sıfırlama isteği aldık.\n\n"
-            f"Şifrenizi sıfırlamak için aşağıdaki bağlantıya tıklayın "
-            f"(15 dakika geçerli):\n\n{reset_url}\n\n"
-            f"Bu isteği siz yapmadıysanız bu e-postayı görmezden gelin.\n\n"
-            f"— Fin-TAP Ekibi"
+            f"Hello {user.name},\n\n"
+            f"We received a password reset request for your Fin-TAP account.\n\n"
+            f"Click the link below to reset your password "
+            f"(valid for 15 minutes):\n\n{reset_url}\n\n"
+            f"If you did not request this, please ignore this email.\n\n"
+            f"— Fin-TAP Team"
         )
         msg.html = (
-            f"<p>Merhaba <b>{user.name}</b>,</p>"
-            f"<p>Şifrenizi sıfırlamak için "
-            f"<a href='{reset_url}'>buraya tıklayın</a> (15 dakika geçerli).</p>"
-            f"<p>Bu isteği siz yapmadıysanız bu e-postayı görmezden gelin.</p>"
-            f"<p>— Fin-TAP Ekibi</p>"
+            f"<p>Hello <b>{user.name}</b>,</p>"
+            f"<p><a href='{reset_url}'>Click here</a> to reset your password (valid for 15 minutes).</p>"
+            f"<p>If you did not request this, please ignore this email.</p>"
+            f"<p>— Fin-TAP Team</p>"
         )
         mail.send(msg)
         return True
     except Exception as e:
-        print(f"[mail] Gönderim hatası: {e}")
+        print(f"[mail] Sending error: {e}")
         return False
 
 
@@ -2141,7 +2135,7 @@ def forgot_password():
     if current_user.is_authenticated:
         return redirect(url_for("root"))
 
-    dev_link = None   # E-posta sunucusu yoksa sayfada gösterilir
+    dev_link = None   # Displayed on the page if mail server is missing
 
     if request.method == "POST":
         email = (request.form.get("email") or "").strip().lower()
@@ -2152,12 +2146,12 @@ def forgot_password():
             reset_url = url_for("reset_password", token=token, _external=True)
             sent      = _send_reset_email(user, reset_url)
             if not sent:
-                # Dev mode — bağlantıyı doğrudan göster
+                # Dev mode — show link directly
                 dev_link = reset_url
                 print(f"[reset] DEV MODE — reset link: {reset_url}")
 
-        # E-posta enumeration'ı önle: her durumda aynı mesaj
-        flash("Kayıtlı bir e-posta girdiyseniz sıfırlama bağlantısı gönderildi.", "success")
+        # Prevent email enumeration: same message in all cases
+        flash("If you entered a registered email, a reset link has been sent.", "success")
 
     return render_template("forgot_password.html", dev_link=dev_link)
 
@@ -2169,17 +2163,17 @@ def reset_password(token):
         return redirect(url_for("root"))
 
     try:
-        user_id = _reset_serializer().loads(token, max_age=900)  # 15 dakika
+        user_id = _reset_serializer().loads(token, max_age=900)  # 15 minutes
     except SignatureExpired:
-        flash("Şifre sıfırlama bağlantısının süresi doldu. Lütfen tekrar isteyin.", "error")
+        flash("The password reset link has expired. Please request a new one.", "error")
         return redirect(url_for("forgot_password"))
     except BadSignature:
-        flash("Geçersiz sıfırlama bağlantısı.", "error")
+        flash("Invalid reset link.", "error")
         return redirect(url_for("forgot_password"))
 
     user = db.session.get(User, user_id)
     if not user:
-        flash("Kullanıcı bulunamadı.", "error")
+        flash("User not found.", "error")
         return redirect(url_for("forgot_password"))
 
     if request.method == "POST":
@@ -2187,7 +2181,7 @@ def reset_password(token):
         confirm  = request.form.get("confirm")  or ""
 
         if password != confirm:
-            flash("Şifreler eşleşmiyor.", "error")
+            flash("Passwords do not match.", "error")
             return render_template("reset_password.html", token=token)
 
         ok, msg = _password_strong(password)
@@ -2197,8 +2191,8 @@ def reset_password(token):
 
         user.password = generate_password_hash(password)
         db.session.commit()
-        print(f"[reset] user={user.email} şifresini sıfırladı")
-        flash("Şifreniz başarıyla güncellendi. Giriş yapabilirsiniz.", "success")
+        print(f"[reset] user={user.email} reset their password")
+        flash("Your password has been successfully updated. You can now log in.", "success")
         return redirect(url_for("login"))
 
     return render_template("reset_password.html", token=token)
@@ -2207,7 +2201,7 @@ def reset_password(token):
 # ── Developer REST API ─────────────────────────────────────────────────────
 
 MAX_KEYS_PER_USER = 5
-API_DAILY_LIMIT   = 100   # ücretsiz tier günlük istek limiti
+API_DAILY_LIMIT   = 100   # free tier daily request limit
 
 
 def _hash_key(raw: str) -> str:
@@ -2215,7 +2209,7 @@ def _hash_key(raw: str) -> str:
 
 
 def _resolve_api_key() -> ApiKey | None:
-    """Authorization: Bearer <key> başlığından ApiKey kaydını döndür."""
+    """Returns the ApiKey record from the Authorization: Bearer <key> header."""
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
         return None
@@ -2228,7 +2222,7 @@ def _resolve_api_key() -> ApiKey | None:
 
 
 def _api_auth_required(f):
-    """Dekoratör: Bearer token doğrulama + günlük limit kontrolü."""
+    """Decorator: Bearer token validation + daily limit check."""
     from functools import wraps
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -2238,17 +2232,17 @@ def _api_auth_required(f):
                             "hint": "Set 'Authorization: Bearer fintap_sk_...' header."}), 401
         if key_obj.requests_today >= API_DAILY_LIMIT:
             return jsonify({"error": f"Daily limit of {API_DAILY_LIMIT} requests reached."}), 429
-        # Sayacı artır
+        # Increment counter
         key_obj.requests_today += 1
         key_obj.last_used_at   = _dt.utcnow()
         db.session.commit()
-        # Sonraki handler'a user bilgisini geç
+        # Pass user info to subsequent handler
         request.api_user_id = key_obj.user_id
         return f(*args, **kwargs)
     return decorated
 
 
-# ── Key yönetim sayfası + CRUD ──────────────────────────────────────────────
+# ── Key Management Page + CRUD ──────────────────────────────────────────────
 
 @app.route("/backtest")
 @login_required
@@ -2356,9 +2350,9 @@ def api_dev_keys_create():
     db.session.add(key_obj)
     db.session.commit()
 
-    # Ham anahtarı SADECE burada döndür — DB'ye kaydedilmez
+    # Return raw key ONLY here — not saved in DB
     return jsonify({"status": "created", "id": key_obj.id,
-                    "key": raw_key,   # göster ve unut
+                    "key": raw_key,   # show and forget
                     "prefix": key_obj.key_prefix}), 201
 
 
@@ -2373,16 +2367,16 @@ def api_dev_keys_revoke(kid):
     return jsonify({"status": "revoked"})
 
 
-# ── Genel amaçlı API v1 ─────────────────────────────────────────────────────
-# Tüm endpoint'ler: Authorization: Bearer fintap_sk_... gerektirir
-# Rate limit: @_api_auth_required içinde günlük 100 istek
+# ── General Purpose API v1 ───────────────────────────────────────────────────
+# All endpoints require: Authorization: Bearer fintap_sk_...
+# Rate limit: 100 daily requests inside @_api_auth_required
 
 @app.route("/api/v1/price/<ticker>")
 @csrf.exempt
 @limiter.limit("120 per minute")
 @_api_auth_required
 def apiv1_price(ticker):
-    """GET /api/v1/price/<ticker> — anlık kapanış fiyatı."""
+    """GET /api/v1/price/<ticker> — current close price."""
     ticker = ticker.upper()
     if ticker not in VALID_TICKERS:
         return jsonify({"error": "Unknown ticker."}), 404
@@ -2409,7 +2403,7 @@ def apiv1_price(ticker):
 @limiter.limit("60 per minute")
 @_api_auth_required
 def apiv1_ohlc(ticker):
-    """GET /api/v1/ohlc/<ticker>?days=30 — OHLCV geçmişi."""
+    """GET /api/v1/ohlc/<ticker>?days=30 — OHLCV history."""
     ticker = ticker.upper()
     if ticker not in VALID_TICKERS:
         return jsonify({"error": "Unknown ticker."}), 404
@@ -2436,7 +2430,7 @@ def apiv1_ohlc(ticker):
 @limiter.limit("30 per minute")
 @_api_auth_required
 def apiv1_sentiment(ticker):
-    """GET /api/v1/sentiment/<ticker> — haber sentiment analizi."""
+    """GET /api/v1/sentiment/<ticker> — news sentiment analysis."""
     ticker = ticker.upper()
     if ticker not in VALID_TICKERS:
         return jsonify({"error": "Unknown ticker."}), 404
@@ -2476,7 +2470,7 @@ def apiv1_sentiment(ticker):
 def apiv1_predict(ticker):
     """
     GET /api/v1/predict/<ticker>?model=LINEAR&horizon=14
-    1 token harcayarak ML tahmin döndürür.
+    Returns ML prediction spending 1 token.
     """
     ticker  = ticker.upper()
     model   = request.args.get("model", "LINEAR").upper()
@@ -2520,33 +2514,33 @@ def apiv1_predict(ticker):
         return jsonify({"error": "Prediction engine error."}), 500
 
 
-# ── Hata handler'ları ──────────────────────────────────────────────────────
+# ── Error Handlers ──────────────────────────────────────────────────────
 @app.errorhandler(404)
 def e404(e):
     if request.path.startswith("/api/"):
-        return jsonify({"error": "Endpoint bulunamadı"}), 404
+        return jsonify({"error": "Endpoint not found"}), 404
     return redirect(url_for("root"))
 
 @app.errorhandler(429)
 def rate_limit_exceeded(e):
     if request.path.startswith("/api/"):
-        return jsonify({"error": "Çok fazla istek. Lütfen bekleyin."}), 429
-    flash("Çok fazla istek gönderildi. Lütfen biraz bekleyin.", "error")
+        return jsonify({"error": "Too many requests. Please wait."}), 429
+    flash("Too many requests sent. Please wait a moment.", "error")
     return redirect(url_for("root"))
 
 @app.errorhandler(500)
 def e500(e):
     print(f"[500 handler] {e}"); traceback.print_exc()
     if request.path.startswith("/api/"):
-        return jsonify({"error": "Sunucu hatası — logları kontrol et"}), 500
-    return "<h3>Sunucu hatası. Birkaç saniye bekleyip tekrar deneyin.</h3>", 500
+        return jsonify({"error": "Server error — check logs"}), 500
+    return "<h3>Server error. Wait a few seconds and try again.</h3>", 500
 
 @app.errorhandler(Exception)
 def unhandled(e):
     print(f"[unhandled exception] {e}"); traceback.print_exc()
     if request.path.startswith("/api/"):
-        return jsonify({"error": "Sunucu hatası. Lütfen tekrar deneyin."}), 500
-    return "<h3>Beklenmeyen hata. Lütfen tekrar deneyin.</h3>", 500
+        return jsonify({"error": "Server error. Please try again."}), 500
+    return "<h3>Unexpected error. Please try again.</h3>", 500
 
 
 if __name__ == "__main__":
